@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>賞味期限メモ</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --accent: #2563eb;
+      --accent-soft: #dbeafe;
+      --danger: #dc2626;
+      --danger-soft: #fee2e2;
+      --warn: #f59e0b;
+      --warn-soft: #fef3c7;
+      --ok: #16a34a;
+      --ok-soft: #dcfce7;
+      --gray: #9ca3af;
+      --gray-soft: #f3f4f6;
+      --border: #e5e7eb;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Yu Gothic UI", "Hiragino Sans", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .app {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 16px 14px 32px;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #2563eb, #3b82f6);
+      color: white;
+      border-radius: 20px;
+      padding: 18px;
+      box-shadow: 0 8px 24px rgba(37, 99, 235, 0.18);
+    }
+    .header h1 { margin: 0 0 4px; font-size: 1.4rem; }
+    .header p { margin: 0; font-size: 0.95rem; opacity: 0.95; }
+
+    .toolbar {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .top-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn, .chip, .icon-btn {
+      border: none;
+      border-radius: 999px;
+      padding: 10px 14px;
+      font-size: 0.95rem;
+      cursor: pointer;
+    }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-secondary { background: var(--panel); color: var(--text); border: 1px solid var(--border); }
+    .btn-danger { background: var(--danger); color: white; }
+
+    .search {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0 12px;
+    }
+    .search input {
+      border: none;
+      outline: none;
+      width: 100%;
+      padding: 12px 2px;
+      background: transparent;
+      font-size: 0.95rem;
+    }
+
+    .filters {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+    .chip {
+      background: var(--panel);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    .chip.active {
+      background: var(--accent);
+      color: white;
+      border-color: var(--accent);
+    }
+
+    .select-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .select-row select {
+      flex: 1;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      background: var(--panel);
+      font-size: 0.95rem;
+    }
+
+    .list {
+      margin-top: 16px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .empty {
+      text-align: center;
+      color: var(--muted);
+      background: var(--panel);
+      border: 1px dashed var(--border);
+      border-radius: 16px;
+      padding: 24px 16px;
+    }
+
+    .card {
+      background: var(--panel);
+      border-radius: 16px;
+      padding: 14px;
+      border-left: 6px solid var(--gray);
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05);
+    }
+    .card.expired { border-left-color: var(--danger); background: var(--danger-soft); }
+    .card.today { border-left-color: var(--danger); background: var(--danger-soft); }
+    .card.urgent { border-left-color: var(--warn); background: var(--warn-soft); }
+    .card.soon { border-left-color: #fbbf24; background: #fefce8; }
+    .card.normal { border-left-color: var(--ok); background: var(--ok-soft); }
+    .card.completed { border-left-color: var(--gray); background: var(--gray-soft); opacity: 0.95; }
+
+    .title-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .title-row h3 { margin: 0; font-size: 1.02rem; }
+    .badge {
+      font-size: 0.8rem;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(0,0,0,0.06);
+      color: var(--text);
+      white-space: nowrap;
+    }
+    .meta {
+      font-size: 0.9rem;
+      color: var(--muted);
+      margin: 4px 0 8px;
+    }
+    .detail-grid {
+      display: grid;
+      gap: 4px;
+      margin-bottom: 10px;
+      font-size: 0.92rem;
+    }
+    .detail-grid span { display: inline-block; }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .actions .btn {
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-size: 0.88rem;
+    }
+    .btn-complete { background: var(--accent); color: white; }
+    .btn-edit { background: var(--gray-soft); color: var(--text); }
+    .btn-delete { background: #fef2f2; color: var(--danger); }
+
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(17,24,39,0.45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 14px;
+      z-index: 1000;
+    }
+    .modal.open { display: flex; }
+    .modal-box {
+      width: min(100%, 520px);
+      background: white;
+      border-radius: 18px;
+      padding: 16px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.2);
+    }
+    .modal-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .modal-head h2 { margin: 0; font-size: 1.1rem; }
+    .close-btn {
+      border: none;
+      background: transparent;
+      font-size: 1.3rem;
+      cursor: pointer;
+    }
+
+    .form {
+      display: grid;
+      gap: 10px;
+    }
+    .form label {
+      display: grid;
+      gap: 6px;
+      font-size: 0.92rem;
+      color: var(--text);
+    }
+    .form input, .form select, .form textarea {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 0.95rem;
+      width: 100%;
+      background: white;
+    }
+    .form textarea { resize: vertical; min-height: 72px; }
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .footer-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 6px;
+    }
+
+    @media (min-width: 700px) {
+      .app { padding: 24px 20px 40px; }
+      .header { padding: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <h1>賞味期限メモ</h1>
+      <p>期限が近い食品を忘れずチェック</p>
+    </header>
+
+    <section class="toolbar">
+      <div class="top-actions">
+        <button class="btn btn-primary" id="addBtn">＋ 商品を追加</button>
+        <button class="btn btn-secondary" id="resetBtn">初期化</button>
+      </div>
+
+      <label class="search">
+        <span>🔎</span>
+        <input id="searchInput" type="text" placeholder="商品名やメモで検索" />
+      </label>
+
+      <div class="filters">
+        <button class="chip active" data-filter="all">すべて</button>
+        <button class="chip" data-filter="near">期限間近</button>
+        <button class="chip" data-filter="expired">期限切れ</button>
+        <button class="chip" data-filter="completed">食べきった</button>
+      </div>
+
+      <div class="select-row">
+        <select id="categoryFilter">
+          <option value="all">すべてのカテゴリ</option>
+        </select>
+      </div>
+    </section>
+
+    <section id="list" class="list"></section>
+  </div>
+
+  <div class="modal" id="modal">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h2 id="modalTitle">商品を登録</h2>
+        <button class="close-btn" id="closeModalBtn" type="button">×</button>
+      </div>
+
+      <form id="itemForm" class="form">
+        <input id="editingId" type="hidden" />
+
+        <label>
+          商品名
+          <input id="nameInput" name="name" type="text" required placeholder="例：牛乳" />
+        </label>
+
+        <label>
+          賞味期限
+          <input id="expiryInput" name="expiryDate" type="date" required />
+        </label>
+
+        <div class="form-row">
+          <label>
+            数量
+            <input id="quantityInput" name="quantity" type="number" min="1" value="1" />
+          </label>
+
+          <label>
+            カテゴリ
+            <select id="categoryInput" name="category" required></select>
+          </label>
+        </div>
+
+        <label>
+          メモ
+          <textarea id="memoInput" name="memo" placeholder="開封済み、冷蔵庫の奥など"></textarea>
+        </label>
+
+        <label>
+          通知
+          <select id="notifyInput" name="notifyDaysBefore">
+            <option value="">通知しない</option>
+            <option value="0">当日</option>
+            <option value="1">1日前</option>
+            <option value="3">3日前</option>
+            <option value="7">7日前</option>
+            <option value="30">30日前</option>
+          </select>
+        </label>
+
+        <div class="footer-actions">
+          <button class="btn btn-secondary" id="cancelBtn" type="button">キャンセル</button>
+          <button class="btn btn-primary" type="submit">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    const STORAGE_KEY = "expiry_items";
+    const DEFAULT_CATEGORIES = ["食材", "お菓子", "調味料", "レトルト・保存食", "飲料"];
+
+    let items = loadItems();
+    let filter = "all";
+    let searchQuery = "";
+    let selectedCategory = "all";
+    let editingId = null;
+
+    const listEl = document.getElementById("list");
+    const addBtn = document.getElementById("addBtn");
+    const resetBtn = document.getElementById("resetBtn");
+    const searchInput = document.getElementById("searchInput");
+    const categoryFilter = document.getElementById("categoryFilter");
+    const modal = document.getElementById("modal");
+    const modalTitle = document.getElementById("modalTitle");
+    const closeModalBtn = document.getElementById("closeModalBtn");
+    const cancelBtn = document.getElementById("cancelBtn");
+    const itemForm = document.getElementById("itemForm");
+    const editingIdInput = document.getElementById("editingId");
+    const nameInput = document.getElementById("nameInput");
+    const expiryInput = document.getElementById("expiryInput");
+    const quantityInput = document.getElementById("quantityInput");
+    const categoryInput = document.getElementById("categoryInput");
+    const memoInput = document.getElementById("memoInput");
+    const notifyInput = document.getElementById("notifyInput");
+
+    function loadItems() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function saveItems() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    }
+
+    function initCategories() {
+      const options = DEFAULT_CATEGORIES.map((name) => `<option value="${name}">${name}</option>`).join("");
+      categoryInput.innerHTML = options;
+      categoryFilter.innerHTML = `<option value="all">すべてのカテゴリ</option>` + options;
+    }
+
+    function today() {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      return d;
+    }
+
+    function parseDate(dateStr) {
+      const [y, m, d] = dateStr.split("-").map(Number);
+      return new Date(y, m - 1, d);
+    }
+
+    function diffDays(expiryDate) {
+      const exp = parseDate(expiryDate);
+      const base = today();
+      const diff = Math.round((exp - base) / (1000 * 60 * 60 * 24));
+      return diff;
+    }
+
+    function getStatus(item) {
+      if (item.status === "completed") return "completed";
+      const days = diffDays(item.expiryDate);
+      if (days < 0) return "expired";
+      if (days === 0) return "today";
+      if (days <= 3) return "urgent";
+      if (days <= 7) return "soon";
+      return "normal";
+    }
+
+    function getLabel(days) {
+      if (days < 0) return `期限切れ ${Math.abs(days)}日`;
+      if (days === 0) return "今日まで";
+      if (days === 1) return "あと1日";
+      return `あと${days}日`;
+    }
+
+    function sortItems(list) {
+      return [...list].sort((a, b) => {
+        if (a.status === "completed" && b.status !== "completed") return 1;
+        if (a.status !== "completed" && b.status === "completed") return -1;
+        if (a.status === "completed") {
+          return new Date(b.completedAt || b.updatedAt) - new Date(a.completedAt || a.updatedAt);
+        }
+        return new Date(a.expiryDate) - new Date(b.expiryDate);
+      });
+    }
+
+    function getFilteredItems() {
+      let result = items.filter((item) => {
+        const matchesSearch = !searchQuery || `${item.name} ${item.memo}`.toLowerCase().includes(searchQuery.toLowerCase());
+        const matchesCategory = selectedCategory === "all" || item.category === selectedCategory;
+
+        if (filter === "completed") {
+          return item.status === "completed" && matchesSearch && matchesCategory;
+        }
+
+        if (item.status === "completed") return false;
+
+        if (filter === "near") {
+          const days = diffDays(item.expiryDate);
+          return days <= 7 && days >= 0 && matchesSearch && matchesCategory;
+        }
+
+        if (filter === "expired") {
+          return diffDays(item.expiryDate) < 0 && matchesSearch && matchesCategory;
+        }
+
+        return matchesSearch && matchesCategory;
+      });
+
+      return sortItems(result);
+    }
+
+    function render() {
+      const filtered = getFilteredItems();
+      categoryFilter.value = selectedCategory;
+
+      if (!filtered.length) {
+        listEl.innerHTML = `<div class="empty">登録された商品がありません。追加してみてください。</div>`;
+        return;
+      }
+
+      listEl.innerHTML = filtered.map((item) => {
+        const status = getStatus(item);
+        const days = diffDays(item.expiryDate);
+        const label = getLabel(days);
+        const memo = item.memo ? item.memo : "メモなし";
+        const completedAt = item.completedAt ? `完了日：${item.completedAt}` : "";
+
+        return `
+          <article class="card ${status}">
+            <div class="title-row">
+              <h3>${escapeHtml(item.name)}</h3>
+              <span class="badge">${escapeHtml(label)}</span>
+            </div>
+            <div class="meta">
+              賞味期限：${escapeHtml(item.expiryDate)}
+            </div>
+            <div class="detail-grid">
+              <span>カテゴリ：${escapeHtml(item.category)}</span>
+              <span>数量：${item.quantity}</span>
+              <span>メモ：${escapeHtml(memo)}</span>
+              ${completedAt ? `<span>${escapeHtml(completedAt)}</span>` : ""}
+            </div>
+            <div class="actions">
+              ${item.status === "completed"
+                ? `<button class="btn btn-complete" data-action="restore" data-id="${item.id}">戻す</button>`
+                : `<button class="btn btn-complete" data-action="complete" data-id="${item.id}">食べきった</button>`
+              }
+              <button class="btn btn-edit" data-action="edit" data-id="${item.id}">編集</button>
+              <button class="btn btn-delete" data-action="delete" data-id="${item.id}">削除</button>
+            </div>
+          </article>
+        `;
+      }).join("");
+    }
+
+    function escapeHtml(text) {
+      return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function openModal() {
+      modal.classList.add("open");
+    }
+
+    function closeModal() {
+      modal.classList.remove("open");
+      itemForm.reset();
+      editingId = null;
+      editingIdInput.value = "";
+      quantityInput.value = "1";
+      notifyInput.value = "";
+      nameInput.focus();
+    }
+
+    function openAddModal() {
+      modalTitle.textContent = "商品を登録";
+      closeModal();
+      openModal();
+    }
+
+    function openEditModal(item) {
+      modalTitle.textContent = "商品を編集";
+      editingId = item.id;
+      editingIdInput.value = item.id;
+      nameInput.value = item.name;
+      expiryInput.value = item.expiryDate;
+      quantityInput.value = item.quantity;
+      categoryInput.value = item.category;
+      memoInput.value = item.memo || "";
+      notifyInput.value = item.notifyDaysBefore ?? "";
+      openModal();
+    }
+
+    function addOrUpdateItem(event) {
+      event.preventDefault();
+
+      const name = nameInput.value.trim();
+      const expiryDate = expiryInput.value;
+      const quantity = Number(quantityInput.value || 1);
+      const category = categoryInput.value;
+      const memo = memoInput.value.trim();
+      const notifyDaysBefore = notifyInput.value ? Number(notifyInput.value) : undefined;
+
+      if (!name || !expiryDate || !category) {
+        alert("商品名・賞味期限・カテゴリは必須です。");
+        return;
+      }
+
+      const now = new Date().toISOString();
+
+      if (editingId) {
+        items = items.map((item) =>
+          item.id === editingId
+            ? { ...item, name, expiryDate, quantity, category, memo, notifyDaysBefore, updatedAt: now }
+            : item
+        );
+      } else {
+        items.unshift({
+          id: crypto.randomUUID(),
+          name,
+          expiryDate,
+          quantity,
+          category,
+          memo,
+          notifyDaysBefore,
+          status: "active",
+          createdAt: now,
+          updatedAt: now
+        });
+      }
+
+      saveItems();
+      render();
+      closeModal();
+    }
+
+    function completeItem(id) {
+      items = items.map((item) =>
+        item.id === id
+          ? { ...item, status: "completed", completedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+          : item
+      );
+      saveItems();
+      render();
+    }
+
+    function restoreItem(id) {
+      items = items.map((item) =>
+        item.id === id
+          ? { ...item, status: "active", completedAt: undefined, updatedAt: new Date().toISOString() }
+          : item
+      );
+      saveItems();
+      render();
+    }
+
+    function deleteItem(id) {
+      if (!confirm("この商品を削除しますか？")) return;
+      items = items.filter((item) => item.id !== id);
+      saveItems();
+      render();
+    }
+
+    function resetAll() {
+      if (!confirm("すべてのデータを削除しますか？")) return;
+      items = [];
+      saveItems();
+      render();
+    }
+
+    addBtn.addEventListener("click", openAddModal);
+    resetBtn.addEventListener("click", resetAll);
+    closeModalBtn.addEventListener("click", closeModal);
+    cancelBtn.addEventListener("click", closeModal);
+    modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
+    itemForm.addEventListener("submit", addOrUpdateItem);
+
+    document.querySelectorAll(".chip").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        document.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
+        chip.classList.add("active");
+        filter = chip.dataset.filter;
+        render();
+      });
+    });
+
+    searchInput.addEventListener("input", (e) => {
+      searchQuery = e.target.value;
+      render();
+    });
+
+    categoryFilter.addEventListener("change", (e) => {
+      selectedCategory = e.target.value;
+      render();
+    });
+
+    listEl.addEventListener("click", (e) => {
+      const button = e.target.closest("button[data-action]");
+      if (!button) return;
+      const { action, id } = button.dataset;
+      if (action === "complete") completeItem(id);
+      if (action === "restore") restoreItem(id);
+      if (action === "edit") {
+        const item = items.find((x) => x.id === id);
+        if (item) openEditModal(item);
+      }
+      if (action === "delete") deleteItem(id);
+    });
+
+    initCategories();
+    render();
+  </script>
+</body>
+</html>

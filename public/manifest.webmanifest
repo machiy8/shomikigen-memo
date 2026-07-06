@@ -1,0 +1,19 @@
+{
+  "name": "賞味期限メモ",
+  "short_name": "期限メモ",
+  "description": "期限が近い食品を忘れずチェックできる賞味期限管理アプリ",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f5f7fb",
+  "theme_color": "#2563eb",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
