@@ -1,11 +1,6 @@
-import { FormEvent, useMemo, useState } from "react";
+﻿import { FormEvent, useMemo, useState } from "react";
 import type { ExpiryItem, FilterMode } from "./types";
-import {
-  formatDaysLabel,
-  getDaysUntil,
-  getExpiryStatus,
-  sortByExpiryDate
-} from "./utils/date";
+import { formatDaysLabel, getDaysUntil, getExpiryStatus, sortByExpiryDate } from "./utils/date";
 import { getItems, saveItems } from "./utils/storage";
 
 const DEFAULT_CATEGORIES = ["食材", "お菓子", "調味料", "レトルト・保存食", "飲料"];
@@ -32,7 +27,7 @@ const emptyForm: FormState = {
   name: "",
   expiryDate: "",
   quantity: "1",
-  category: DEFAULT_CATEGORIES[0],
+  category: "",
   memo: "",
   notifyDaysBefore: ""
 };
@@ -45,10 +40,14 @@ function createId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+function formatShortDate(date: string): string {
+  const [, month, day] = date.split("-");
+  return `${month}/${day}`;
+}
+
 function toLocalDateTime(isoDate?: string): string {
   if (!isoDate) return "";
   return new Intl.DateTimeFormat("ja-JP", {
-    year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -60,30 +59,24 @@ function App() {
   const [items, setItems] = useState<ExpiryItem[]>(() => getItems());
   const [filter, setFilter] = useState<FilterMode>("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
-  const [searchQuery, setSearchQuery] = useState("");
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
 
-  const activeCount = items.filter((item) => item.status === "active").length;
-  const nearCount = items.filter((item) => {
-    const days = getDaysUntil(item.expiryDate);
-    return item.status === "active" && days >= 0 && days <= 7;
-  }).length;
-  const expiredCount = items.filter(
-    (item) => item.status === "active" && getDaysUntil(item.expiryDate) < 0
-  ).length;
+  const categories = useMemo(() => {
+    const names = new Set(DEFAULT_CATEGORIES);
+    items.forEach((item) => {
+      if (item.category.trim()) names.add(item.category.trim());
+    });
+    return [...names].sort((a, b) => a.localeCompare(b, "ja"));
+  }, [items]);
 
   const visibleItems = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-
     const filtered = items.filter((item) => {
-      const matchesSearch =
-        !query || `${item.name} ${item.memo}`.toLowerCase().includes(query);
       const matchesCategory = categoryFilter === "all" || item.category === categoryFilter;
 
-      if (!matchesSearch || !matchesCategory) return false;
-
+      if (!matchesCategory) return false;
       if (filter === "completed") return item.status === "completed";
       if (item.status === "completed") return false;
 
@@ -98,7 +91,7 @@ function App() {
     });
 
     return sortByExpiryDate(filtered);
-  }, [categoryFilter, filter, items, searchQuery]);
+  }, [categoryFilter, filter, items]);
 
   function persist(nextItems: ExpiryItem[]) {
     setItems(nextItems);
@@ -107,12 +100,14 @@ function App() {
 
   function openAddForm() {
     setEditingId(null);
-    setForm(emptyForm);
+    setOpenMenuId(null);
+    setForm({ ...emptyForm, category: categories[0] ?? "" });
     setIsFormOpen(true);
   }
 
   function openEditForm(item: ExpiryItem) {
     setEditingId(item.id);
+    setOpenMenuId(null);
     setForm({
       name: item.name,
       expiryDate: item.expiryDate,
@@ -140,7 +135,7 @@ function App() {
 
     const name = form.name.trim();
     const expiryDate = form.expiryDate;
-    const category = form.category;
+    const category = form.category.trim();
     const memo = form.memo.trim();
     const quantity = Math.max(1, Number(form.quantity) || 1);
     const notifyDaysBefore =
@@ -193,6 +188,7 @@ function App() {
 
   function completeItem(id: string) {
     const now = new Date().toISOString();
+    setOpenMenuId(null);
     persist(
       items.map((item) =>
         item.id === id
@@ -204,6 +200,7 @@ function App() {
 
   function restoreItem(id: string) {
     const now = new Date().toISOString();
+    setOpenMenuId(null);
     persist(
       items.map((item) =>
         item.id === id
@@ -214,6 +211,7 @@ function App() {
   }
 
   function deleteItem(id: string) {
+    setOpenMenuId(null);
     if (!window.confirm("この商品を削除しますか？")) return;
     persist(items.filter((item) => item.id !== id));
   }
@@ -223,90 +221,41 @@ function App() {
     persist([]);
     setFilter("all");
     setCategoryFilter("all");
-    setSearchQuery("");
+    setOpenMenuId(null);
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" onClick={() => setOpenMenuId(null)}>
       <main className="app">
-        <header className="hero">
+        <header className="app-header">
           <div>
-            <p className="eyebrow">家庭用ストック管理</p>
             <h1>賞味期限メモ</h1>
-            <p>期限が近い食品を忘れずチェック</p>
+            <p>{visibleItems.length}件表示中</p>
           </div>
-          <button className="primary-button" type="button" onClick={openAddForm}>
-            商品を追加
+          <button className="add-button" type="button" onClick={openAddForm}>
+            追加
           </button>
         </header>
 
-        <section className="summary" aria-label="登録状況">
-          <div>
-            <span>{activeCount}</span>
-            <p>管理中</p>
-          </div>
-          <div>
-            <span>{nearCount}</span>
-            <p>7日以内</p>
-          </div>
-          <div>
-            <span>{expiredCount}</span>
-            <p>期限切れ</p>
-          </div>
-        </section>
-
-        <section className="controls" aria-label="検索と絞り込み">
-          <label className="search-box">
-            <span aria-hidden="true">検索</span>
-            <input
-              type="search"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="商品名・メモで検索"
-            />
-          </label>
+        <section className="list-tools" aria-label="絞り込み">
+          <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
+            <option value="all">すべてのカテゴリ</option>
+            {categories.map((category) => (
+              <option key={category} value={category}>
+                {category}
+              </option>
+            ))}
+          </select>
 
           <div className="filter-row" role="tablist" aria-label="状態フィルター">
-            <FilterButton
-              active={filter === "all"}
-              label="すべて"
-              onClick={() => setFilter("all")}
-            />
-            <FilterButton
-              active={filter === "near"}
-              label="期限間近"
-              onClick={() => setFilter("near")}
-            />
-            <FilterButton
-              active={filter === "expired"}
-              label="期限切れ"
-              onClick={() => setFilter("expired")}
-            />
+            <FilterButton active={filter === "all"} label="すべて" onClick={() => setFilter("all")} />
+            <FilterButton active={filter === "near"} label="期限間近" onClick={() => setFilter("near")} />
+            <FilterButton active={filter === "expired"} label="期限切れ" onClick={() => setFilter("expired")} />
             <FilterButton
               active={filter === "completed"}
               label="食べきった"
               onClick={() => setFilter("completed")}
             />
-          </div>
-
-          <div className="select-actions">
-            <label>
-              <span>カテゴリ</span>
-              <select
-                value={categoryFilter}
-                onChange={(event) => setCategoryFilter(event.target.value)}
-              >
-                <option value="all">すべてのカテゴリ</option>
-                {DEFAULT_CATEGORIES.map((category) => (
-                  <option key={category} value={category}>
-                    {category}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button className="quiet-button" type="button" onClick={resetAll}>
-              データ初期化
-            </button>
           </div>
         </section>
 
@@ -314,21 +263,30 @@ function App() {
           {visibleItems.length === 0 ? (
             <div className="empty-state">
               <h2>表示できる商品がありません</h2>
-              <p>商品を追加するか、検索条件を変えてください。</p>
+              <p>右上の追加から登録できます。</p>
             </div>
           ) : (
             visibleItems.map((item) => (
-              <ItemCard
+              <ItemRow
                 key={item.id}
                 item={item}
+                menuOpen={openMenuId === item.id}
                 onComplete={completeItem}
                 onDelete={deleteItem}
                 onEdit={openEditForm}
+                onMenuToggle={(id) => setOpenMenuId((current) => (current === id ? null : id))}
                 onRestore={restoreItem}
               />
             ))
           )}
         </section>
+
+        <details className="maintenance">
+          <summary>データ管理</summary>
+          <button className="text-danger-button" type="button" onClick={resetAll}>
+            データを初期化
+          </button>
+        </details>
       </main>
 
       {isFormOpen && (
@@ -343,7 +301,7 @@ function App() {
             <div className="modal-header">
               <h2 id="form-title">{editingId ? "商品を編集" : "商品を登録"}</h2>
               <button className="icon-button" type="button" aria-label="閉じる" onClick={closeForm}>
-                ×
+                x
               </button>
             </div>
 
@@ -383,17 +341,19 @@ function App() {
 
                 <label>
                   カテゴリ <strong>必須</strong>
-                  <select
+                  <input
                     required
+                    list="category-options"
+                    type="text"
                     value={form.category}
                     onChange={(event) => updateForm("category", event.target.value)}
-                  >
-                    {DEFAULT_CATEGORIES.map((category) => (
-                      <option key={category} value={category}>
-                        {category}
-                      </option>
+                    placeholder="例: 冷蔵庫"
+                  />
+                  <datalist id="category-options">
+                    {categories.map((category) => (
+                      <option key={category} value={category} />
                     ))}
-                  </select>
+                  </datalist>
                 </label>
               </div>
 
@@ -451,87 +411,82 @@ function FilterButton({
       type="button"
       role="tab"
       aria-selected={active}
-      onClick={onClick}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
     >
       {label}
     </button>
   );
 }
 
-function ItemCard({
+function ItemRow({
   item,
+  menuOpen,
   onComplete,
   onDelete,
   onEdit,
+  onMenuToggle,
   onRestore
 }: {
   item: ExpiryItem;
+  menuOpen: boolean;
   onComplete: (id: string) => void;
   onDelete: (id: string) => void;
   onEdit: (item: ExpiryItem) => void;
+  onMenuToggle: (id: string) => void;
   onRestore: (id: string) => void;
 }) {
   const expiryStatus = item.status === "completed" ? "completed" : getExpiryStatus(item.expiryDate);
-  const daysLabel = formatDaysLabel(item.expiryDate);
-  const notifyLabel =
-    item.notifyDaysBefore === undefined
-      ? "通知なし"
-      : item.notifyDaysBefore === 0
-        ? "当日"
-        : `${item.notifyDaysBefore}日前`;
+  const completedText = item.completedAt ? `完了 ${toLocalDateTime(item.completedAt)}` : "完了済み";
 
   return (
-    <article className={`item-card ${expiryStatus}`}>
-      <div className="item-main">
-        <div className="item-title-row">
-          <h2>{item.name}</h2>
-          <span className="date-badge">{daysLabel}</span>
-        </div>
-
-        <p className="expiry-date">賞味期限: {item.expiryDate}</p>
-
-        <dl className="item-details">
-          <div>
-            <dt>カテゴリ</dt>
-            <dd>{item.category}</dd>
-          </div>
-          <div>
-            <dt>数量</dt>
-            <dd>{item.quantity}</dd>
-          </div>
-          <div>
-            <dt>通知</dt>
-            <dd>{notifyLabel}</dd>
-          </div>
-          <div>
-            <dt>メモ</dt>
-            <dd>{item.memo || "なし"}</dd>
-          </div>
-          {item.status === "completed" && (
-            <div>
-              <dt>完了日</dt>
-              <dd>{toLocalDateTime(item.completedAt)}</dd>
-            </div>
-          )}
-        </dl>
+    <article className={`item-row ${expiryStatus}`}>
+      <div className="row-date">
+        <span className="days-label">{formatDaysLabel(item.expiryDate)}</span>
+        <span>{formatShortDate(item.expiryDate)}</span>
       </div>
 
-      <div className="card-actions">
-        {item.status === "completed" ? (
-          <button className="primary-button small" type="button" onClick={() => onRestore(item.id)}>
-            戻す
-          </button>
-        ) : (
-          <button className="primary-button small" type="button" onClick={() => onComplete(item.id)}>
-            食べきった
-          </button>
+      <div className="row-body">
+        <h2>{item.name}</h2>
+        <p>
+          数量:{item.quantity} <span>{item.category}</span>
+          {item.status === "completed" && <span>{completedText}</span>}
+        </p>
+        {item.memo && <p className="row-memo">{item.memo}</p>}
+      </div>
+
+      <div className="row-menu" onClick={(event) => event.stopPropagation()}>
+        <button
+          className="menu-button"
+          type="button"
+          aria-label={`${item.name}のメニュー`}
+          aria-expanded={menuOpen}
+          onClick={() => onMenuToggle(item.id)}
+        >
+          ...
+        </button>
+
+        {menuOpen && (
+          <div className="menu-popover">
+            {item.status === "completed" ? (
+              <button type="button" onClick={() => onRestore(item.id)}>
+                戻す
+              </button>
+            ) : (
+              <button type="button" onClick={() => onComplete(item.id)}>
+                食べた・使い切った
+              </button>
+            )}
+            <button type="button" onClick={() => onEdit(item)}>
+              編集
+            </button>
+            <button className="danger-menu-item" type="button" onClick={() => onDelete(item.id)}>
+              削除
+            </button>
+          </div>
         )}
-        <button className="secondary-button small" type="button" onClick={() => onEdit(item)}>
-          編集
-        </button>
-        <button className="danger-button small" type="button" onClick={() => onDelete(item.id)}>
-          削除
-        </button>
       </div>
     </article>
   );
