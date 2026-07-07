@@ -1,9 +1,9 @@
-﻿import { FormEvent, useMemo, useState } from "react";
+﻿import { DragEvent, FormEvent, useMemo, useState } from "react";
 import type { ExpiryItem, FilterMode } from "./types";
 import { formatDaysLabel, getDaysUntil, getExpiryStatus, sortByExpiryDate } from "./utils/date";
-import { getItems, saveItems } from "./utils/storage";
+import { getCategories, getItems, saveCategories, saveItems } from "./utils/storage";
 
-const DEFAULT_CATEGORIES = ["食材", "お菓子", "調味料", "レトルト・保存食", "飲料"];
+const ADD_CATEGORY_VALUE = "__add_category__";
 
 const NOTIFY_OPTIONS = [
   { label: "通知しない", value: "" },
@@ -22,6 +22,8 @@ type FormState = {
   memo: string;
   notifyDaysBefore: string;
 };
+
+type ViewMode = "home" | "categories";
 
 const emptyForm: FormState = {
   name: "",
@@ -57,20 +59,15 @@ function toLocalDateTime(isoDate?: string): string {
 
 function App() {
   const [items, setItems] = useState<ExpiryItem[]>(() => getItems());
+  const [categories, setCategories] = useState<string[]>(() => getCategories(getItems()));
   const [filter, setFilter] = useState<FilterMode>("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [viewMode, setViewMode] = useState<ViewMode>("home");
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [draggingCategory, setDraggingCategory] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
-
-  const categories = useMemo(() => {
-    const names = new Set(DEFAULT_CATEGORIES);
-    items.forEach((item) => {
-      if (item.category.trim()) names.add(item.category.trim());
-    });
-    return [...names].sort((a, b) => a.localeCompare(b, "ja"));
-  }, [items]);
 
   const visibleItems = useMemo(() => {
     const filtered = items.filter((item) => {
@@ -93,9 +90,18 @@ function App() {
     return sortByExpiryDate(filtered);
   }, [categoryFilter, filter, items]);
 
-  function persist(nextItems: ExpiryItem[]) {
+  function persistItems(nextItems: ExpiryItem[]) {
     setItems(nextItems);
     saveItems(nextItems);
+  }
+
+  function persistCategories(nextCategories: string[]) {
+    const normalized = nextCategories
+      .map((category) => category.trim())
+      .filter((category, index, list) => category && list.indexOf(category) === index);
+
+    setCategories(normalized);
+    saveCategories(normalized);
   }
 
   function openAddForm() {
@@ -120,6 +126,12 @@ function App() {
     setIsFormOpen(true);
   }
 
+  function openCategoryManager() {
+    setOpenMenuId(null);
+    setIsFormOpen(false);
+    setViewMode("categories");
+  }
+
   function closeForm() {
     setIsFormOpen(false);
     setEditingId(null);
@@ -128,6 +140,14 @@ function App() {
 
   function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function handleCategorySelect(value: string) {
+    if (value === ADD_CATEGORY_VALUE) {
+      openCategoryManager();
+      return;
+    }
+    updateForm("category", value);
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -146,10 +166,14 @@ function App() {
       return;
     }
 
+    if (!categories.includes(category)) {
+      persistCategories([...categories, category]);
+    }
+
     const now = new Date().toISOString();
 
     if (editingId) {
-      persist(
+      persistItems(
         items.map((item) =>
           item.id === editingId
             ? {
@@ -166,7 +190,7 @@ function App() {
         )
       );
     } else {
-      persist([
+      persistItems([
         {
           id: createId(),
           name,
@@ -189,7 +213,7 @@ function App() {
   function completeItem(id: string) {
     const now = new Date().toISOString();
     setOpenMenuId(null);
-    persist(
+    persistItems(
       items.map((item) =>
         item.id === id
           ? { ...item, status: "completed", completedAt: now, updatedAt: now }
@@ -201,7 +225,7 @@ function App() {
   function restoreItem(id: string) {
     const now = new Date().toISOString();
     setOpenMenuId(null);
-    persist(
+    persistItems(
       items.map((item) =>
         item.id === id
           ? { ...item, status: "active", completedAt: undefined, updatedAt: now }
@@ -213,15 +237,149 @@ function App() {
   function deleteItem(id: string) {
     setOpenMenuId(null);
     if (!window.confirm("この商品を削除しますか？")) return;
-    persist(items.filter((item) => item.id !== id));
+    persistItems(items.filter((item) => item.id !== id));
   }
 
   function resetAll() {
     if (!window.confirm("すべてのデータを削除しますか？")) return;
-    persist([]);
+    persistItems([]);
     setFilter("all");
     setCategoryFilter("all");
     setOpenMenuId(null);
+  }
+
+  function addCategory() {
+    const name = window.prompt("追加するカテゴリ名を入力してください。");
+    const category = name?.trim();
+    if (!category) return;
+    if (categories.includes(category)) {
+      window.alert("同じ名前のカテゴリがあります。");
+      return;
+    }
+    persistCategories([...categories, category]);
+  }
+
+  function renameCategory(oldName: string) {
+    const name = window.prompt("新しいカテゴリ名を入力してください。", oldName);
+    const newName = name?.trim();
+    if (!newName || newName === oldName) return;
+    if (categories.includes(newName)) {
+      window.alert("同じ名前のカテゴリがあります。");
+      return;
+    }
+
+    persistCategories(categories.map((category) => (category === oldName ? newName : category)));
+    persistItems(
+      items.map((item) =>
+        item.category === oldName ? { ...item, category: newName, updatedAt: new Date().toISOString() } : item
+      )
+    );
+    if (categoryFilter === oldName) setCategoryFilter(newName);
+    if (form.category === oldName) updateForm("category", newName);
+  }
+
+  function deleteCategory(name: string) {
+    if (categories.length <= 1) {
+      window.alert("カテゴリは1つ以上必要です。");
+      return;
+    }
+
+    const usedCount = items.filter((item) => item.category === name).length;
+    const rest = categories.filter((category) => category !== name);
+
+    if (usedCount > 0) {
+      const fallback = rest[0];
+      const ok = window.confirm(
+        `「${name}」を使っている商品が${usedCount}件あります。削除すると「${fallback}」へ移動します。よろしいですか？`
+      );
+      if (!ok) return;
+      persistItems(
+        items.map((item) =>
+          item.category === name ? { ...item, category: fallback, updatedAt: new Date().toISOString() } : item
+        )
+      );
+    } else if (!window.confirm(`「${name}」を削除しますか？`)) {
+      return;
+    }
+
+    persistCategories(rest);
+    if (categoryFilter === name) setCategoryFilter("all");
+    if (form.category === name) updateForm("category", rest[0] ?? "");
+  }
+
+  function moveCategory(fromIndex: number, toIndex: number) {
+    if (toIndex < 0 || toIndex >= categories.length || fromIndex === toIndex) return;
+    const next = [...categories];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    persistCategories(next);
+  }
+
+  function handleCategoryDrop(event: DragEvent<HTMLLIElement>, targetCategory: string) {
+    event.preventDefault();
+    if (!draggingCategory || draggingCategory === targetCategory) return;
+    moveCategory(categories.indexOf(draggingCategory), categories.indexOf(targetCategory));
+    setDraggingCategory(null);
+  }
+
+  if (viewMode === "categories") {
+    return (
+      <div className="app-shell">
+        <main className="app">
+          <header className="app-header">
+            <div>
+              <h1>カテゴリ管理</h1>
+              <p>追加・名前変更・削除・並び替え</p>
+            </div>
+            <button className="secondary-button" type="button" onClick={() => setViewMode("home")}>
+              戻る
+            </button>
+          </header>
+
+          <section className="category-manager">
+            <button className="primary-button full-button" type="button" onClick={addCategory}>
+              カテゴリを追加
+            </button>
+
+            <ol className="category-list">
+              {categories.map((category, index) => (
+                <li
+                  key={category}
+                  className="category-row"
+                  draggable
+                  onDragStart={() => setDraggingCategory(category)}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => handleCategoryDrop(event, category)}
+                >
+                  <span className="drag-handle" aria-hidden="true">
+                    =
+                  </span>
+                  <span className="category-name">{category}</span>
+                  <div className="category-actions">
+                    <button type="button" onClick={() => moveCategory(index, index - 1)} disabled={index === 0}>
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => moveCategory(index, index + 1)}
+                      disabled={index === categories.length - 1}
+                    >
+                      ↓
+                    </button>
+                    <button type="button" onClick={() => renameCategory(category)}>
+                      名前
+                    </button>
+                    <button className="danger-inline" type="button" onClick={() => deleteCategory(category)}>
+                      削除
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </section>
+        </main>
+      </div>
+    );
   }
 
   return (
@@ -283,6 +441,9 @@ function App() {
 
         <details className="maintenance">
           <summary>データ管理</summary>
+          <button className="text-link-button" type="button" onClick={openCategoryManager}>
+            カテゴリを管理
+          </button>
           <button className="text-danger-button" type="button" onClick={resetAll}>
             データを初期化
           </button>
@@ -341,19 +502,18 @@ function App() {
 
                 <label>
                   カテゴリ <strong>必須</strong>
-                  <input
+                  <select
                     required
-                    list="category-options"
-                    type="text"
                     value={form.category}
-                    onChange={(event) => updateForm("category", event.target.value)}
-                    placeholder="例: 冷蔵庫"
-                  />
-                  <datalist id="category-options">
+                    onChange={(event) => handleCategorySelect(event.target.value)}
+                  >
                     {categories.map((category) => (
-                      <option key={category} value={category} />
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
                     ))}
-                  </datalist>
+                    <option value={ADD_CATEGORY_VALUE}>追加する</option>
+                  </select>
                 </label>
               </div>
 

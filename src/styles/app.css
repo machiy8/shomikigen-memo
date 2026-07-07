@@ -381,13 +381,94 @@ textarea:focus {
   cursor: pointer;
 }
 
+.text-link-button,
 .text-danger-button {
   margin-top: 8px;
   padding: 8px 0;
-  color: var(--danger);
   background: transparent;
   border: none;
   font-weight: 800;
+}
+
+.text-link-button {
+  display: block;
+  color: var(--accent);
+}
+
+.text-danger-button {
+  color: var(--danger);
+}
+
+.category-manager {
+  display: grid;
+  gap: 12px;
+  padding: 12px 14px 24px;
+}
+
+.full-button {
+  width: 100%;
+}
+
+.category-list {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.category-row {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 8px;
+  padding: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.drag-handle {
+  display: grid;
+  width: 28px;
+  height: 36px;
+  place-items: center;
+  color: var(--muted);
+  font-weight: 900;
+  cursor: grab;
+}
+
+.category-name {
+  min-width: 0;
+  align-self: center;
+  overflow-wrap: anywhere;
+  font-weight: 800;
+}
+
+.category-actions {
+  display: flex;
+  grid-column: 2;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.category-actions button {
+  min-height: 34px;
+  padding: 6px 10px;
+  color: var(--text);
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.category-actions button:disabled {
+  color: #cbd5e1;
+  cursor: not-allowed;
+}
+
+.category-actions .danger-inline {
+  color: var(--danger);
 }
 
 .modal-backdrop {
