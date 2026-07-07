@@ -3,7 +3,7 @@ import type { ExpiryItem, FilterMode } from "./types";
 import { formatDaysLabel, getDaysUntil, getExpiryStatus, sortByExpiryDate } from "./utils/date";
 import { getCategories, getItems, saveCategories, saveItems } from "./utils/storage";
 
-const ADD_CATEGORY_VALUE = "__add_category__";
+const MANAGE_CATEGORY_VALUE = "__manage_category__";
 
 const NOTIFY_OPTIONS = [
   { label: "通知しない", value: "" },
@@ -143,11 +143,19 @@ function App() {
   }
 
   function handleCategorySelect(value: string) {
-    if (value === ADD_CATEGORY_VALUE) {
+    if (value === MANAGE_CATEGORY_VALUE) {
       openCategoryManager();
       return;
     }
     updateForm("category", value);
+  }
+
+  function handleCategoryFilterSelect(value: string) {
+    if (value === MANAGE_CATEGORY_VALUE) {
+      openCategoryManager();
+      return;
+    }
+    setCategoryFilter(value);
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -396,13 +404,17 @@ function App() {
         </header>
 
         <section className="list-tools" aria-label="絞り込み">
-          <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
+          <select
+            value={categoryFilter}
+            onChange={(event) => handleCategoryFilterSelect(event.target.value)}
+          >
             <option value="all">すべてのカテゴリ</option>
             {categories.map((category) => (
               <option key={category} value={category}>
                 {category}
               </option>
             ))}
+            <option value={MANAGE_CATEGORY_VALUE}>追加・変更</option>
           </select>
 
           <div className="filter-row" role="tablist" aria-label="状態フィルター">
@@ -512,7 +524,7 @@ function App() {
                         {category}
                       </option>
                     ))}
-                    <option value={ADD_CATEGORY_VALUE}>追加する</option>
+                    <option value={MANAGE_CATEGORY_VALUE}>追加・変更</option>
                   </select>
                 </label>
               </div>
