@@ -107,7 +107,10 @@ function App() {
   function openAddForm() {
     setEditingId(null);
     setOpenMenuId(null);
-    setForm({ ...emptyForm, category: categories[0] ?? "" });
+    setForm({
+      ...emptyForm,
+      category: categoryFilter !== "all" ? categoryFilter : categories[0] ?? ""
+    });
     setIsFormOpen(true);
   }
 
