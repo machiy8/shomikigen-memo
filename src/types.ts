@@ -9,6 +9,7 @@ export type ExpiryItem = {
   quantity: number;
   category: string;
   memo: string;
+  opened?: boolean;
   notifyDaysBefore?: number;
   status: ItemStatus;
   createdAt: string;
@@ -16,4 +17,4 @@ export type ExpiryItem = {
   completedAt?: string;
 };
 
-export type FilterMode = "all" | "near" | "expired" | "completed";
+export type FilterMode = "all" | "opened" | "completed";

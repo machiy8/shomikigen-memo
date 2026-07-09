@@ -311,6 +311,11 @@ textarea:focus {
   line-height: 1.35;
 }
 
+.opened-label {
+  color: var(--orange);
+  font-weight: 800;
+}
+
 .row-memo {
   margin-top: 3px !important;
   overflow: hidden;
@@ -533,6 +538,24 @@ textarea:focus {
 .item-form strong {
   color: var(--danger);
   font-size: 0.78rem;
+}
+
+.check-field {
+  display: flex !important;
+  align-items: center;
+  gap: 10px !important;
+  min-height: 42px;
+  padding: 8px 10px;
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-weight: 800;
+}
+
+.check-field input {
+  width: 20px;
+  min-height: 20px;
+  accent-color: var(--accent);
 }
 
 .form-grid {

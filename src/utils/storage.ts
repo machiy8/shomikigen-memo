@@ -1,4 +1,4 @@
-import type { ExpiryItem } from "../types";
+﻿import type { ExpiryItem } from "../types";
 
 export const STORAGE_KEY = "expiry_items";
 export const CATEGORY_STORAGE_KEY = "expiry_categories";
@@ -28,6 +28,7 @@ export function getItems(): ExpiryItem[] {
       ...item,
       quantity: Number.isFinite(item.quantity) && item.quantity > 0 ? item.quantity : 1,
       memo: item.memo ?? "",
+      opened: Boolean(item.opened),
       status: item.status === "completed" ? "completed" : "active"
     }));
   } catch {

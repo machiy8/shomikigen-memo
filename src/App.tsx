@@ -1,6 +1,6 @@
 ﻿import { DragEvent, FormEvent, useMemo, useState } from "react";
 import type { ExpiryItem, FilterMode } from "./types";
-import { formatDaysLabel, getDaysUntil, getExpiryStatus, sortByExpiryDate } from "./utils/date";
+import { formatDaysLabel, getExpiryStatus, sortByExpiryDate } from "./utils/date";
 import { getCategories, getItems, saveCategories, saveItems } from "./utils/storage";
 
 const MANAGE_CATEGORY_VALUE = "__manage_category__";
@@ -20,6 +20,7 @@ type FormState = {
   quantity: string;
   category: string;
   memo: string;
+  opened: boolean;
   notifyDaysBefore: string;
 };
 
@@ -31,6 +32,7 @@ const emptyForm: FormState = {
   quantity: "1",
   category: "",
   memo: "",
+  opened: false,
   notifyDaysBefore: ""
 };
 
@@ -77,12 +79,7 @@ function App() {
       if (filter === "completed") return item.status === "completed";
       if (item.status === "completed") return false;
 
-      if (filter === "near") {
-        const days = getDaysUntil(item.expiryDate);
-        return days >= 0 && days <= 7;
-      }
-
-      if (filter === "expired") return getDaysUntil(item.expiryDate) < 0;
+      if (filter === "opened") return Boolean(item.opened);
 
       return true;
     });
@@ -123,6 +120,7 @@ function App() {
       quantity: String(item.quantity || 1),
       category: item.category,
       memo: item.memo,
+      opened: Boolean(item.opened),
       notifyDaysBefore:
         item.notifyDaysBefore === undefined ? "" : String(item.notifyDaysBefore)
     });
@@ -168,6 +166,7 @@ function App() {
     const expiryDate = form.expiryDate;
     const category = form.category.trim();
     const memo = form.memo.trim();
+    const opened = form.opened;
     const quantity = Math.max(1, Number(form.quantity) || 1);
     const notifyDaysBefore =
       form.notifyDaysBefore === "" ? undefined : Number(form.notifyDaysBefore);
@@ -194,6 +193,7 @@ function App() {
                 quantity,
                 category,
                 memo,
+                opened,
                 notifyDaysBefore,
                 updatedAt: now
               }
@@ -209,6 +209,7 @@ function App() {
           quantity,
           category,
           memo,
+          opened,
           notifyDaysBefore,
           status: "active",
           createdAt: now,
@@ -422,8 +423,7 @@ function App() {
 
           <div className="filter-row" role="tablist" aria-label="状態フィルター">
             <FilterButton active={filter === "all"} label="すべて" onClick={() => setFilter("all")} />
-            <FilterButton active={filter === "near"} label="期限間近" onClick={() => setFilter("near")} />
-            <FilterButton active={filter === "expired"} label="期限切れ" onClick={() => setFilter("expired")} />
+            <FilterButton active={filter === "opened"} label="開封済み" onClick={() => setFilter("opened")} />
             <FilterButton
               active={filter === "completed"}
               label="食べきった"
@@ -541,6 +541,15 @@ function App() {
                 />
               </label>
 
+              <label className="check-field">
+                <input
+                  type="checkbox"
+                  checked={form.opened}
+                  onChange={(event) => updateForm("opened", event.target.checked)}
+                />
+                <span>開封済み</span>
+              </label>
+
               <label>
                 通知メモ
                 <select
@@ -627,6 +636,7 @@ function ItemRow({
         <h2>{item.name}</h2>
         <p>
           数量:{item.quantity} <span>{item.category}</span>
+          {item.opened && <span className="opened-label">開封済み</span>}
           {item.status === "completed" && <span>{completedText}</span>}
         </p>
         {item.memo && <p className="row-memo">{item.memo}</p>}
