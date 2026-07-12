@@ -246,6 +246,16 @@ function App() {
     );
   }
 
+  function toggleOpenedItem(id: string) {
+    const now = new Date().toISOString();
+    setOpenMenuId(null);
+    persistItems(
+      items.map((item) =>
+        item.id === id ? { ...item, opened: !item.opened, updatedAt: now } : item
+      )
+    );
+  }
+
   function deleteItem(id: string) {
     setOpenMenuId(null);
     if (!window.confirm("この商品を削除しますか？")) return;
@@ -448,6 +458,7 @@ function App() {
                 onDelete={deleteItem}
                 onEdit={openEditForm}
                 onMenuToggle={(id) => setOpenMenuId((current) => (current === id ? null : id))}
+                onToggleOpened={toggleOpenedItem}
                 onRestore={restoreItem}
               />
             ))
@@ -541,15 +552,6 @@ function App() {
                 />
               </label>
 
-              <label className="check-field">
-                <input
-                  type="checkbox"
-                  checked={form.opened}
-                  onChange={(event) => updateForm("opened", event.target.checked)}
-                />
-                <span>開封済み</span>
-              </label>
-
               <label>
                 通知メモ
                 <select
@@ -612,6 +614,7 @@ function ItemRow({
   onDelete,
   onEdit,
   onMenuToggle,
+  onToggleOpened,
   onRestore
 }: {
   item: ExpiryItem;
@@ -620,6 +623,7 @@ function ItemRow({
   onDelete: (id: string) => void;
   onEdit: (item: ExpiryItem) => void;
   onMenuToggle: (id: string) => void;
+  onToggleOpened: (id: string) => void;
   onRestore: (id: string) => void;
 }) {
   const expiryStatus = item.status === "completed" ? "completed" : getExpiryStatus(item.expiryDate);
@@ -660,9 +664,14 @@ function ItemRow({
                 戻す
               </button>
             ) : (
-              <button type="button" onClick={() => onComplete(item.id)}>
-                食べた・使い切った
-              </button>
+              <>
+                <button type="button" onClick={() => onComplete(item.id)}>
+                  食べた・使い切った
+                </button>
+                <button type="button" onClick={() => onToggleOpened(item.id)}>
+                  {item.opened ? "未開封に戻す" : "開封済みにする"}
+                </button>
+              </>
             )}
             <button type="button" onClick={() => onEdit(item)}>
               編集

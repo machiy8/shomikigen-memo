@@ -1,4 +1,4 @@
-const CACHE_NAME = "shomikigen-memo-v6";
+const CACHE_NAME = "shomikigen-memo-v7";
 const APP_SHELL = ["/", "/index.html", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (event) => {
