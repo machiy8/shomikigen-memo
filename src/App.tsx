@@ -1,7 +1,14 @@
-﻿import { DragEvent, FormEvent, useMemo, useState } from "react";
+﻿import { ChangeEvent, DragEvent, FormEvent, useMemo, useState } from "react";
 import type { ExpiryItem, FilterMode } from "./types";
 import { formatDaysLabel, getExpiryStatus, sortByExpiryDate } from "./utils/date";
-import { getCategories, getItems, saveCategories, saveItems } from "./utils/storage";
+import {
+  createBackup,
+  getCategories,
+  getItems,
+  parseBackup,
+  saveCategories,
+  saveItems
+} from "./utils/storage";
 
 const MANAGE_CATEGORY_VALUE = "__manage_category__";
 
@@ -270,6 +277,53 @@ function App() {
     setOpenMenuId(null);
   }
 
+  function exportBackup() {
+    const backup = createBackup(items, categories);
+    const json = JSON.stringify(backup, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `shomikigen-memo-backup-${date}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function importBackup(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const backup = parseBackup(String(reader.result ?? ""));
+        const ok = window.confirm(
+          `バックアップを読み込みます。現在のデータは置き換わります。\n\n商品: ${backup.items.length}件\nカテゴリ: ${backup.categories.length}件\n\nよろしいですか？`
+        );
+        if (!ok) return;
+
+        persistItems(backup.items);
+        persistCategories(backup.categories);
+        setFilter("all");
+        setCategoryFilter("all");
+        setOpenMenuId(null);
+        window.alert("バックアップを読み込みました。");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "バックアップを読み込めませんでした。";
+        window.alert(message);
+      }
+    };
+    reader.onerror = () => {
+      window.alert("ファイルを読み込めませんでした。");
+    };
+    reader.readAsText(file);
+  }
+
   function addCategory() {
     const name = window.prompt("追加するカテゴリ名を入力してください。");
     const category = name?.trim();
@@ -470,6 +524,13 @@ function App() {
           <button className="text-link-button" type="button" onClick={openCategoryManager}>
             カテゴリを管理
           </button>
+          <button className="text-link-button" type="button" onClick={exportBackup}>
+            バックアップを書き出し
+          </button>
+          <label className="text-link-button file-import-label">
+            バックアップを読み込み
+            <input type="file" accept="application/json,.json" onChange={importBackup} />
+          </label>
           <button className="text-danger-button" type="button" onClick={resetAll}>
             データを初期化
           </button>
@@ -687,3 +748,4 @@ function ItemRow({
 }
 
 export default App;
+

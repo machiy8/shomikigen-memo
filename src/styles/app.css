@@ -400,6 +400,20 @@ textarea:focus {
   color: var(--accent);
 }
 
+.file-import-label {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.file-import-label input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
 .text-danger-button {
   color: var(--danger);
 }
