@@ -103,7 +103,10 @@ export function rescheduleNotifications(
         smallIcon: "ic_stat_notify",
         iconColor: "#2563EB",
         autoCancel: true,
-        // 正確なアラームの権限は使わない（数分ずれてよい）。端末が省電力中でも鳴るようにだけする
+        // 正確なアラームの権限は使わない（数分ずれてよい）。端末が省電力中でも鳴るようにだけする。
+        // isExactNotification を false にしないと、プラグインが schedule のたびに
+        // Android 12 以降の「アラームとリマインダー」設定画面を開いてしまう（エミュレータで確認）
+        isExactNotification: false,
         schedule: { at: p.at, allowWhileIdle: true },
         extra: { route: NOTIFICATION_ROUTE_SOON }
       }))
