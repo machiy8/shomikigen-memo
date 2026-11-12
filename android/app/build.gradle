@@ -16,8 +16,25 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // リリース署名：TWA 版と同じ android.keystore（アップロード鍵）を使う。
+    // パスワードはファイルに書かない。scripts/build-release.ps1 がその場で聞き、このプロセスの環境変数だけで渡す。
+    // 環境変数が無いときは署名なしの .aab になる（Play には出せない）。
+    def releaseStore = System.getenv("SHOMIKIGEN_KEYSTORE_PATH")
+    signingConfigs {
+        if (releaseStore) {
+            release {
+                storeFile file(releaseStore)
+                storePassword System.getenv("SHOMIKIGEN_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("SHOMIKIGEN_KEY_ALIAS") ?: "android"
+                keyPassword System.getenv("SHOMIKIGEN_KEY_PASSWORD")
+            }
+        }
+    }
     buildTypes {
         release {
+            if (releaseStore) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
