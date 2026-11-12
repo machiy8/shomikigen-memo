@@ -862,3 +862,12 @@ textarea:focus {
 .notify-warning {
   color: var(--danger);
 }
+
+.notify-prompt {
+  padding: 0 16px 16px;
+}
+
+.notify-prompt p {
+  margin: 0 0 10px;
+  line-height: 1.6;
+}

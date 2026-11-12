@@ -28,6 +28,7 @@ import {
 } from "./native/notifications";
 import { shareBackupFile } from "./native/backup";
 import { MAX_DAYS_BEFORE, type NotificationSettings } from "./utils/notifyPlan";
+import { loadPrompted, savePrompted, shouldAskNotification } from "./utils/notifyPrompt";
 
 const PLAY_STORE_URL =
   "https://play.google.com/store/apps/details?id=jp.revoapp.shomikigen" +
@@ -133,6 +134,8 @@ function App() {
   const [permissionBlocked, setPermissionBlocked] = useState(false);
   const [showMigrateBanner, setShowMigrateBanner] = useState(() => isMigrateVisit());
   const importInputRef = useRef<HTMLInputElement>(null);
+  // 最初に品物を登録したときの「通知をオンにしますか？」（アプリ版だけ・1回だけ）
+  const [isNotifyPromptOpen, setIsNotifyPromptOpen] = useState(false);
 
   // 品物・通知設定が変わったとき、起動したとき、アプリに戻ってきたときに30日分を予約し直す
   const itemsRef = useRef(items);
@@ -179,13 +182,14 @@ function App() {
   }, [native]);
 
   // Android の戻るボタン：開いている画面を閉じる。何も開いていなければアプリを閉じる
-  const backStateRef = useRef({ isFormOpen, isMaintenanceOpen, consumingItem, viewMode, openMenuId });
-  backStateRef.current = { isFormOpen, isMaintenanceOpen, consumingItem, viewMode, openMenuId };
+  const backStateRef = useRef({ isFormOpen, isMaintenanceOpen, consumingItem, viewMode, openMenuId, isNotifyPromptOpen });
+  backStateRef.current = { isFormOpen, isMaintenanceOpen, consumingItem, viewMode, openMenuId, isNotifyPromptOpen };
   useEffect(() => {
     if (!native) return;
     const back = CapApp.addListener("backButton", () => {
       const state = backStateRef.current;
-      if (state.consumingItem) setConsumingItem(null);
+      if (state.isNotifyPromptOpen) answerNotifyPromptRef.current(false);
+      else if (state.consumingItem) setConsumingItem(null);
       else if (state.isFormOpen) closeFormRef.current();
       else if (state.isMaintenanceOpen) setIsMaintenanceOpen(false);
       else if (state.viewMode === "categories") closeCategoryManagerRef.current();
@@ -197,6 +201,15 @@ function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [native]);
+
+  // 「オンにする」でも「今はしない」でも、もう聞かない（設定からいつでもオンにできる）
+  async function answerNotifyPrompt(turnOn: boolean) {
+    savePrompted();
+    setIsNotifyPromptOpen(false);
+    if (turnOn) await updateNotifySettings({ enabled: true });
+  }
+  const answerNotifyPromptRef = useRef(answerNotifyPrompt);
+  answerNotifyPromptRef.current = answerNotifyPrompt;
 
   function showSoonList() {
     setViewMode("home");
@@ -441,7 +454,19 @@ function App() {
           ...items
         ]);
 
-    if (saved) closeForm();
+    if (!saved) return;
+    closeForm();
+
+    if (
+      shouldAskNotification({
+        native,
+        prompted: loadPrompted(),
+        enabled: notifySettings.enabled,
+        isNewItem: !editingId
+      })
+    ) {
+      setIsNotifyPromptOpen(true);
+    }
   }
 
   function completeItem(id: string) {
@@ -1007,6 +1032,35 @@ function App() {
               <button className="text-danger-button" type="button" onClick={resetAll}>
                 データを初期化
               </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {isNotifyPromptOpen && (
+        <div className="modal-backdrop" role="presentation">
+          <section
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="notify-prompt-title"
+          >
+            <div className="modal-header">
+              <h2 id="notify-prompt-title">期限が近づいたら知らせますか？</h2>
+            </div>
+            <div className="notify-prompt">
+              <p>
+                期限が近い品物がある日だけ、1日1回まとめて通知します（初期設定：朝8時・3日前から）。時刻と日数は ⚙ の「設定とデータ」で変えられます。
+              </p>
+              <p className="notify-help">通知は端末の中だけで作られ、データは外に送られません。</p>
+              <div className="form-actions">
+                <button className="secondary-button" type="button" onClick={() => void answerNotifyPrompt(false)}>
+                  今はしない
+                </button>
+                <button className="primary-button" type="button" onClick={() => void answerNotifyPrompt(true)}>
+                  通知をオンにする
+                </button>
+              </div>
             </div>
           </section>
         </div>
