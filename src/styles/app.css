@@ -745,3 +745,120 @@ textarea:focus {
   font-weight: 800;
   text-decoration: none;
 }
+
+/* ===== 期限のお知らせ（アプリ版だけ）・アプリへの引っ越し ===== */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.migrate-card {
+  margin: 12px 0;
+  padding: 16px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--accent-soft);
+  border-radius: 8px;
+}
+
+.migrate-card h2 {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+}
+
+.migrate-card p,
+.migrate-steps {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.migrate-steps {
+  padding-left: 1.4em;
+}
+
+.migrate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.link-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.migrate-note {
+  font-size: 0.8rem;
+}
+
+.notify-panel {
+  margin: 0 16px 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-strong);
+}
+
+.notify-panel h3 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+
+.notify-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  font-weight: 700;
+}
+
+.notify-toggle input {
+  width: 22px;
+  height: 22px;
+}
+
+.notify-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 4px 0 8px;
+}
+
+.notify-grid label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.notify-time {
+  display: flex;
+  gap: 4px;
+}
+
+.notify-time select {
+  flex: 1;
+  min-width: 0;
+}
+
+.notify-help,
+.notify-status,
+.notify-warning {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.notify-warning {
+  color: var(--danger);
+}

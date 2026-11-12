@@ -1,4 +1,5 @@
-﻿import { ChangeEvent, DragEvent, FormEvent, useMemo, useState } from "react";
+﻿import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { App as CapApp } from "@capacitor/app";
 import type { ExpiryItem, FilterMode } from "./types";
 import {
   formatDaysLabel,
@@ -15,6 +16,18 @@ import {
   saveCategories,
   saveItems
 } from "./utils/storage";
+import {
+  describePending,
+  ensureNotificationPermission,
+  hasNotificationPermission,
+  isNativeApp,
+  loadNotificationSettings,
+  onNotificationTap,
+  rescheduleNotifications,
+  saveNotificationSettings
+} from "./native/notifications";
+import { shareBackupFile } from "./native/backup";
+import { MAX_DAYS_BEFORE, type NotificationSettings } from "./utils/notifyPlan";
 
 const PLAY_STORE_URL =
   "https://play.google.com/store/apps/details?id=jp.revoapp.shomikigen" +
@@ -24,6 +37,7 @@ const PLAY_STORE_URL =
 // ブラウザでWeb版を使っている人にだけ出す。
 function isInstalledApp(): boolean {
   if (typeof window === "undefined") return false;
+  if (isNativeApp()) return true;
   if (document.referrer.startsWith("android-app://")) return true;
   return window.matchMedia("(display-mode: standalone)").matches;
 }
@@ -33,9 +47,20 @@ const SAVE_FAILED_MESSAGE =
 
 const MANAGE_CATEGORY_VALUE = "__manage_category__";
 
-// 通知機能はv2で実装予定。データ項目 notifyDaysBefore は
+// 通知は Android アプリ版（Capacitor）だけ：1日1回のまとめ通知を端末内で予約する（src/native/notifications.ts）。
+// 品物ごとの notifyDaysBefore は使わない（設定の「何日前から」で全体を決める）。
 // 既存バックアップとの互換のため型・保存処理には残してある。
-// 実際に通知が届かない以上、選択UIは出さない（ROADMAP_v2.md 参照）。
+
+const WEB_APP_URL = "https://shomikigen.revoapp.jp/?migrate=1";
+
+// Web 版を「アプリへ引っ越すため」に開いたとき（アプリの案内のリンクから）
+function isMigrateVisit(): boolean {
+  if (typeof window === "undefined" || isNativeApp()) return false;
+  return new URLSearchParams(window.location.search).get("migrate") === "1";
+}
+
+const HOUR_OPTIONS = Array.from({ length: 24 }, (_, hour) => hour);
+const MINUTE_OPTIONS = [0, 15, 30, 45];
 
 type FormState = {
   name: string;
@@ -100,6 +125,112 @@ function App() {
   // カテゴリ管理へ寄り道したあと、入力途中のフォームへ戻すためのフラグ
   const [resumeFormAfterCategories, setResumeFormAfterCategories] = useState(false);
   const [categoryAddedForForm, setCategoryAddedForForm] = useState<string | null>(null);
+  const native = isNativeApp();
+  const [notifySettings, setNotifySettings] = useState<NotificationSettings>(() =>
+    loadNotificationSettings()
+  );
+  const [notifyStatus, setNotifyStatus] = useState("");
+  const [permissionBlocked, setPermissionBlocked] = useState(false);
+  const [showMigrateBanner, setShowMigrateBanner] = useState(() => isMigrateVisit());
+  const importInputRef = useRef<HTMLInputElement>(null);
+
+  // 品物・通知設定が変わったとき、起動したとき、アプリに戻ってきたときに30日分を予約し直す
+  const itemsRef = useRef(items);
+  const settingsRef = useRef(notifySettings);
+  itemsRef.current = items;
+  settingsRef.current = notifySettings;
+
+  useEffect(() => {
+    if (!native) return;
+    let cancelled = false;
+    rescheduleNotifications(items, notifySettings)
+      .then(async () => {
+        const [status, granted] = await Promise.all([describePending(), hasNotificationPermission()]);
+        if (cancelled) return;
+        setNotifyStatus(status);
+        setPermissionBlocked(notifySettings.enabled && !granted);
+      })
+      .catch(() => {
+        if (!cancelled) setNotifyStatus("通知の予約に失敗しました");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [native, items, notifySettings]);
+
+  useEffect(() => {
+    if (!native) return;
+    const resume = CapApp.addListener("appStateChange", ({ isActive }) => {
+      if (!isActive) return;
+      // 日付が変わっている・端末の設定で通知を切り替えた、などに追いつく
+      void rescheduleNotifications(itemsRef.current, settingsRef.current)
+        .then(async () => {
+          setNotifyStatus(await describePending());
+          setPermissionBlocked(settingsRef.current.enabled && !(await hasNotificationPermission()));
+        })
+        .catch(() => undefined);
+    });
+    const stopTap = onNotificationTap(() => showSoonList());
+    return () => {
+      void resume.then((l) => l.remove());
+      stopTap();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [native]);
+
+  // Android の戻るボタン：開いている画面を閉じる。何も開いていなければアプリを閉じる
+  const backStateRef = useRef({ isFormOpen, isMaintenanceOpen, consumingItem, viewMode, openMenuId });
+  backStateRef.current = { isFormOpen, isMaintenanceOpen, consumingItem, viewMode, openMenuId };
+  useEffect(() => {
+    if (!native) return;
+    const back = CapApp.addListener("backButton", () => {
+      const state = backStateRef.current;
+      if (state.consumingItem) setConsumingItem(null);
+      else if (state.isFormOpen) closeFormRef.current();
+      else if (state.isMaintenanceOpen) setIsMaintenanceOpen(false);
+      else if (state.viewMode === "categories") closeCategoryManagerRef.current();
+      else if (state.openMenuId) setOpenMenuId(null);
+      else void CapApp.exitApp();
+    });
+    return () => {
+      void back.then((l) => l.remove());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [native]);
+
+  function showSoonList() {
+    setViewMode("home");
+    setIsFormOpen(false);
+    setIsMaintenanceOpen(false);
+    setConsumingItem(null);
+    setOpenMenuId(null);
+    setSearchQuery("");
+    setCategoryFilter("all");
+    setFilter("soon");
+  }
+
+  async function updateNotifySettings(patch: Partial<NotificationSettings>) {
+    const next = { ...notifySettings, ...patch };
+
+    // オンにするときだけ通知の許可を求める（Android 13 以降）
+    if (patch.enabled === true) {
+      const granted = await ensureNotificationPermission().catch(() => false);
+      if (!granted) {
+        setPermissionBlocked(true);
+        window.alert(
+          "通知が許可されていません。端末の「設定」→「アプリ」→「賞味期限メモ」→「通知」から許可してから、もう一度オンにしてください。"
+        );
+        return;
+      }
+      setPermissionBlocked(false);
+    }
+
+    if (!saveNotificationSettings(next)) {
+      window.alert(SAVE_FAILED_MESSAGE);
+      return;
+    }
+    setNotifySettings(next);
+  }
 
   const visibleItems = useMemo(() => {
     const keyword = normalizeForSearch(searchQuery.trim());
@@ -225,6 +356,11 @@ function App() {
     setResumeFormAfterCategories(false);
     setCategoryAddedForForm(null);
   }
+
+  const closeFormRef = useRef(closeForm);
+  closeFormRef.current = closeForm;
+  const closeCategoryManagerRef = useRef(closeCategoryManager);
+  closeCategoryManagerRef.current = closeCategoryManager;
 
   function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -402,12 +538,24 @@ function App() {
   function exportBackup() {
     const backup = createBackup(items, categories);
     const json = JSON.stringify(backup, null, 2);
+    const fileName = `shomikigen-memo-backup-${getLocalDateStamp()}.json`;
+
+    if (native) {
+      shareBackupFile(fileName, json).catch((error: unknown) => {
+        // 共有シートを閉じただけのときは何も言わない
+        const message = error instanceof Error ? error.message : "";
+        if (/cancel/i.test(message)) return;
+        window.alert("バックアップを書き出せませんでした。");
+      });
+      return;
+    }
+
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
 
     link.href = url;
-    link.download = `shomikigen-memo-backup-${getLocalDateStamp()}.json`;
+    link.download = fileName;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -433,6 +581,7 @@ function App() {
         setFilter("all");
         setCategoryFilter("all");
         setOpenMenuId(null);
+        setIsMaintenanceOpen(false);
         window.alert("バックアップを読み込みました。");
       } catch (error) {
         const message = error instanceof Error ? error.message : "バックアップを読み込めませんでした。";
@@ -605,6 +754,23 @@ function App() {
           </div>
         </header>
 
+        {showMigrateBanner && (
+          <section className="migrate-card" aria-label="アプリへの引っ越し">
+            <h2>Androidアプリへの引っ越し</h2>
+            <p>
+              この画面のデータ（{items.length}件）をバックアップに書き出し、アプリの「バックアップから戻す」で読み込んでください。
+            </p>
+            <div className="migrate-actions">
+              <button className="primary-button" type="button" onClick={exportBackup}>
+                バックアップを書き出す
+              </button>
+              <button className="secondary-button" type="button" onClick={() => setShowMigrateBanner(false)}>
+                閉じる
+              </button>
+            </div>
+          </section>
+        )}
+
         <section className="list-tools" aria-label="絞り込み">
           <div className="search-row">
             <input
@@ -658,7 +824,34 @@ function App() {
         </section>
 
         <section className="item-list" aria-label="商品一覧">
-          {visibleItems.length === 0 ? (
+          {visibleItems.length === 0 && native && items.length === 0 ? (
+            <div className="empty-state migrate-card">
+              <h2>以前のデータを戻しますか？</h2>
+              <p>
+                アプリを新しくしたため、以前の版で登録した品物はこの画面に引き継がれていません。以前のデータはブラウザ（Chrome
+                など）に残っています。
+              </p>
+              <ol className="migrate-steps">
+                <li>
+                  「Web版を開く」でブラウザの賞味期限メモを開き、「バックアップを書き出す」を押す（保存先は「ダウンロード」など）
+                </li>
+                <li>このアプリに戻り「バックアップから戻す」で、書き出したファイルを選ぶ</li>
+              </ol>
+              <div className="migrate-actions">
+                <a className="secondary-button link-button" href={WEB_APP_URL} target="_blank" rel="noopener">
+                  Web版を開く
+                </a>
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={() => importInputRef.current?.click()}
+                >
+                  バックアップから戻す
+                </button>
+              </div>
+              <p className="migrate-note">初めて使う方は、右上の「追加」から登録できます。</p>
+            </div>
+          ) : visibleItems.length === 0 ? (
             <div className="empty-state">
               <h2>表示できる商品がありません</h2>
               <p>右上の追加から登録できます。</p>
@@ -679,6 +872,16 @@ function App() {
             ))
           )}
         </section>
+
+        <input
+          ref={importInputRef}
+          className="visually-hidden"
+          type="file"
+          accept="application/json,.json"
+          onChange={importBackup}
+          tabIndex={-1}
+          aria-hidden="true"
+        />
 
         {!isInstalledApp() && (
           <footer className="app-footer">
@@ -704,7 +907,7 @@ function App() {
             onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="modal-header">
-              <h2 id="maintenance-title">データ管理</h2>
+              <h2 id="maintenance-title">{native ? "設定とデータ" : "データ管理"}</h2>
               <button
                 className="icon-button"
                 type="button"
@@ -714,6 +917,77 @@ function App() {
                 x
               </button>
             </div>
+
+            {native && (
+              <div className="notify-panel" aria-label="通知の設定">
+                <h3>期限のお知らせ</h3>
+                <label className="notify-toggle">
+                  <input
+                    type="checkbox"
+                    checked={notifySettings.enabled}
+                    onChange={(event) => void updateNotifySettings({ enabled: event.target.checked })}
+                  />
+                  1日1回まとめて通知する
+                </label>
+                <div className="notify-grid">
+                  <label>
+                    時刻
+                    <span className="notify-time">
+                      <select
+                        value={notifySettings.hour}
+                        disabled={!notifySettings.enabled}
+                        onChange={(event) => void updateNotifySettings({ hour: Number(event.target.value) })}
+                        aria-label="時"
+                      >
+                        {HOUR_OPTIONS.map((hour) => (
+                          <option key={hour} value={hour}>
+                            {hour}時
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={notifySettings.minute}
+                        disabled={!notifySettings.enabled}
+                        onChange={(event) => void updateNotifySettings({ minute: Number(event.target.value) })}
+                        aria-label="分"
+                      >
+                        {(MINUTE_OPTIONS.includes(notifySettings.minute)
+                          ? MINUTE_OPTIONS
+                          : [...MINUTE_OPTIONS, notifySettings.minute].sort((a, b) => a - b)
+                        ).map((minute) => (
+                          <option key={minute} value={minute}>
+                            {String(minute).padStart(2, "0")}分
+                          </option>
+                        ))}
+                      </select>
+                    </span>
+                  </label>
+                  <label>
+                    何日前から
+                    <select
+                      value={notifySettings.daysBefore}
+                      disabled={!notifySettings.enabled}
+                      onChange={(event) => void updateNotifySettings({ daysBefore: Number(event.target.value) })}
+                    >
+                      {Array.from({ length: MAX_DAYS_BEFORE + 1 }, (_, days) => days).map((days) => (
+                        <option key={days} value={days}>
+                          {days === 0 ? "当日だけ" : `${days}日前から`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <p className="notify-help">
+                  期限が近い品物がある日だけ、指定の時刻ごろに知らせます（数分ずれることがあります）。0件の日は通知しません。
+                </p>
+                {permissionBlocked && (
+                  <p className="notify-warning">
+                    端末の設定で通知がオフになっています。「設定」→「アプリ」→「賞味期限メモ」→「通知」から許可してください。
+                  </p>
+                )}
+                {notifySettings.enabled && notifyStatus && <p className="notify-status">{notifyStatus}</p>}
+              </div>
+            )}
 
             <div className="maintenance-panel">
               <button

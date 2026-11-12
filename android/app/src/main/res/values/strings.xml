@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">賞味期限メモ</string>
+    <string name="title_activity_main">賞味期限メモ</string>
+    <string name="package_name">jp.revoapp.shomikigen</string>
+    <string name="custom_url_scheme">jp.revoapp.shomikigen</string>
+</resources>
