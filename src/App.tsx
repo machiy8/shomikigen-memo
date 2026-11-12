@@ -1,6 +1,12 @@
 ﻿import { ChangeEvent, DragEvent, FormEvent, useMemo, useState } from "react";
 import type { ExpiryItem, FilterMode } from "./types";
-import { formatDaysLabel, getExpiryStatus, sortByExpiryDate } from "./utils/date";
+import {
+  formatDaysLabel,
+  getExpiryStatus,
+  getLocalDateStamp,
+  sortByExpiryDate
+} from "./utils/date";
+import { normalizeForSearch } from "./utils/text";
 import {
   createBackup,
   getCategories,
@@ -10,16 +16,26 @@ import {
   saveItems
 } from "./utils/storage";
 
+const PLAY_STORE_URL =
+  "https://play.google.com/store/apps/details?id=jp.revoapp.shomikigen" +
+  "&utm_source=web&utm_medium=app_footer&utm_campaign=install";
+
+// TWA（Playからインストールしたアプリ）で開いているときは、Playへの導線を出さない。
+// ブラウザでWeb版を使っている人にだけ出す。
+function isInstalledApp(): boolean {
+  if (typeof window === "undefined") return false;
+  if (document.referrer.startsWith("android-app://")) return true;
+  return window.matchMedia("(display-mode: standalone)").matches;
+}
+
+const SAVE_FAILED_MESSAGE =
+  "保存できませんでした。端末の空き容量やブラウザの設定を確認してください。直前の変更は元に戻しました。";
+
 const MANAGE_CATEGORY_VALUE = "__manage_category__";
 
-const NOTIFY_OPTIONS = [
-  { label: "通知しない", value: "" },
-  { label: "当日", value: "0" },
-  { label: "1日前", value: "1" },
-  { label: "3日前", value: "3" },
-  { label: "7日前", value: "7" },
-  { label: "30日前", value: "30" }
-];
+// 通知機能はv2で実装予定。データ項目 notifyDaysBefore は
+// 既存バックアップとの互換のため型・保存処理には残してある。
+// 実際に通知が届かない以上、選択UIは出さない（ROADMAP_v2.md 参照）。
 
 type FormState = {
   name: string;
@@ -77,35 +93,75 @@ function App() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [draggingCategory, setDraggingCategory] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isMaintenanceOpen, setIsMaintenanceOpen] = useState(false);
+  const [consumingItem, setConsumingItem] = useState<ExpiryItem | null>(null);
+  const [consumeAmount, setConsumeAmount] = useState("1");
+  // カテゴリ管理へ寄り道したあと、入力途中のフォームへ戻すためのフラグ
+  const [resumeFormAfterCategories, setResumeFormAfterCategories] = useState(false);
+  const [categoryAddedForForm, setCategoryAddedForForm] = useState<string | null>(null);
 
   const visibleItems = useMemo(() => {
+    const keyword = normalizeForSearch(searchQuery.trim());
+
     const filtered = items.filter((item) => {
       const matchesCategory = categoryFilter === "all" || item.category === categoryFilter;
 
       if (!matchesCategory) return false;
+
+      if (keyword) {
+        const haystack = normalizeForSearch(`${item.name} ${item.memo}`);
+        if (!haystack.includes(keyword)) return false;
+      }
+
       if (filter === "completed") return item.status === "completed";
       if (item.status === "completed") return false;
 
       if (filter === "opened") return Boolean(item.opened);
 
+      if (filter === "expired") return getExpiryStatus(item.expiryDate) === "expired";
+
+      if (filter === "soon") {
+        const status = getExpiryStatus(item.expiryDate);
+        return status === "today" || status === "soon3" || status === "soon7";
+      }
+
       return true;
     });
 
     return sortByExpiryDate(filtered);
-  }, [categoryFilter, filter, items]);
+  }, [categoryFilter, filter, items, searchQuery]);
 
-  function persistItems(nextItems: ExpiryItem[]) {
+  // 保存できなかったときは画面も元に戻す。
+  // 「表示されているのに保存されていない」状態を作らないため。
+  function persistItems(nextItems: ExpiryItem[]): boolean {
+    const previous = items;
     setItems(nextItems);
-    saveItems(nextItems);
+
+    if (!saveItems(nextItems)) {
+      setItems(previous);
+      window.alert(SAVE_FAILED_MESSAGE);
+      return false;
+    }
+
+    return true;
   }
 
-  function persistCategories(nextCategories: string[]) {
+  function persistCategories(nextCategories: string[]): boolean {
+    const previous = categories;
     const normalized = nextCategories
       .map((category) => category.trim())
       .filter((category, index, list) => category && list.indexOf(category) === index);
 
     setCategories(normalized);
-    saveCategories(normalized);
+
+    if (!saveCategories(normalized)) {
+      setCategories(previous);
+      window.alert(SAVE_FAILED_MESSAGE);
+      return false;
+    }
+
+    return true;
   }
 
   function openAddForm() {
@@ -134,16 +190,40 @@ function App() {
     setIsFormOpen(true);
   }
 
-  function openCategoryManager() {
+  // fromForm=true のときは、入力途中のフォーム内容を保持したまま寄り道し、
+  // 「戻る」で同じフォームへ復帰する（新しいカテゴリで登録したい場面のため）。
+  function openCategoryManager(fromForm = false) {
     setOpenMenuId(null);
     setIsFormOpen(false);
+    setIsMaintenanceOpen(false);
+    setResumeFormAfterCategories(fromForm);
+    setCategoryAddedForForm(null);
     setViewMode("categories");
+  }
+
+  function closeCategoryManager() {
+    setViewMode("home");
+
+    if (!resumeFormAfterCategories) return;
+
+    setResumeFormAfterCategories(false);
+    setForm((current) => {
+      if (categoryAddedForForm && categories.includes(categoryAddedForForm)) {
+        return { ...current, category: categoryAddedForForm };
+      }
+      if (categories.includes(current.category)) return current;
+      return { ...current, category: categories[0] ?? "" };
+    });
+    setCategoryAddedForForm(null);
+    setIsFormOpen(true);
   }
 
   function closeForm() {
     setIsFormOpen(false);
     setEditingId(null);
     setForm(emptyForm);
+    setResumeFormAfterCategories(false);
+    setCategoryAddedForForm(null);
   }
 
   function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
@@ -152,7 +232,7 @@ function App() {
 
   function handleCategorySelect(value: string) {
     if (value === MANAGE_CATEGORY_VALUE) {
-      openCategoryManager();
+      openCategoryManager(true);
       return;
     }
     updateForm("category", value);
@@ -183,15 +263,16 @@ function App() {
       return;
     }
 
-    if (!categories.includes(category)) {
-      persistCategories([...categories, category]);
+    if (!categories.includes(category) && !persistCategories([...categories, category])) {
+      return;
     }
 
     const now = new Date().toISOString();
 
-    if (editingId) {
-      persistItems(
-        items.map((item) =>
+    // 保存に失敗したときはフォームを閉じない（入力内容を失わせない）。
+    const saved = editingId
+      ? persistItems(
+          items.map((item) =>
           item.id === editingId
             ? {
                 ...item,
@@ -205,28 +286,26 @@ function App() {
                 updatedAt: now
               }
             : item
+          )
         )
-      );
-    } else {
-      persistItems([
-        {
-          id: createId(),
-          name,
-          expiryDate,
-          quantity,
-          category,
-          memo,
-          opened,
-          notifyDaysBefore,
-          status: "active",
-          createdAt: now,
-          updatedAt: now
-        },
-        ...items
-      ]);
-    }
+      : persistItems([
+          {
+            id: createId(),
+            name,
+            expiryDate,
+            quantity,
+            category,
+            memo,
+            opened,
+            notifyDaysBefore,
+            status: "active",
+            createdAt: now,
+            updatedAt: now
+          },
+          ...items
+        ]);
 
-    closeForm();
+    if (saved) closeForm();
   }
 
   function completeItem(id: string) {
@@ -239,6 +318,49 @@ function App() {
           : item
       )
     );
+  }
+
+  function requestConsume(item: ExpiryItem) {
+    setOpenMenuId(null);
+
+    if (item.quantity <= 1) {
+      completeItem(item.id);
+      return;
+    }
+
+    setConsumingItem(item);
+    setConsumeAmount("1");
+  }
+
+  function closeConsumeModal() {
+    setConsumingItem(null);
+    setConsumeAmount("1");
+  }
+
+  function handleConsumeSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (!consumingItem) return;
+
+    const amount = Math.min(
+      Math.max(1, Math.round(Number(consumeAmount)) || 1),
+      consumingItem.quantity
+    );
+    const now = new Date().toISOString();
+    const remaining = consumingItem.quantity - amount;
+
+    persistItems(
+      items.map((item) => {
+        if (item.id !== consumingItem.id) return item;
+
+        if (remaining <= 0) {
+          return { ...item, status: "completed", completedAt: now, updatedAt: now };
+        }
+
+        return { ...item, quantity: remaining, updatedAt: now };
+      })
+    );
+
+    closeConsumeModal();
   }
 
   function restoreItem(id: string) {
@@ -282,11 +404,10 @@ function App() {
     const json = JSON.stringify(backup, null, 2);
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
-    const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     const link = document.createElement("a");
 
     link.href = url;
-    link.download = `shomikigen-memo-backup-${date}.json`;
+    link.download = `shomikigen-memo-backup-${getLocalDateStamp()}.json`;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -332,7 +453,10 @@ function App() {
       window.alert("同じ名前のカテゴリがあります。");
       return;
     }
-    persistCategories([...categories, category]);
+    if (persistCategories([...categories, category])) {
+      // 登録フォームから来ている場合、戻ったときにこのカテゴリを選んだ状態にする
+      setCategoryAddedForForm(category);
+    }
   }
 
   function renameCategory(oldName: string) {
@@ -405,9 +529,9 @@ function App() {
           <header className="app-header">
             <div>
               <h1>カテゴリ管理</h1>
-              <p>追加・名前変更・削除・並び替え</p>
+              <p>{resumeFormAfterCategories ? "戻ると入力中の登録画面に戻ります" : "追加・名前変更・削除・並び替え"}</p>
             </div>
-            <button className="secondary-button" type="button" onClick={() => setViewMode("home")}>
+            <button className="secondary-button" type="button" onClick={closeCategoryManager}>
               戻る
             </button>
           </header>
@@ -466,12 +590,43 @@ function App() {
             <h1>賞味期限メモ</h1>
             <p>{visibleItems.length}件表示中</p>
           </div>
-          <button className="add-button" type="button" onClick={openAddForm}>
-            追加
-          </button>
+          <div className="header-actions">
+            <button
+              className="icon-button"
+              type="button"
+              aria-label="データ管理"
+              onClick={() => setIsMaintenanceOpen(true)}
+            >
+              ⚙
+            </button>
+            <button className="add-button" type="button" onClick={openAddForm}>
+              追加
+            </button>
+          </div>
         </header>
 
         <section className="list-tools" aria-label="絞り込み">
+          <div className="search-row">
+            <input
+              type="search"
+              className="search-input"
+              value={searchQuery}
+              placeholder="商品名・メモで検索"
+              aria-label="商品名・メモで検索"
+              onChange={(event) => setSearchQuery(event.target.value)}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                className="search-clear"
+                aria-label="検索をクリア"
+                onClick={() => setSearchQuery("")}
+              >
+                ×
+              </button>
+            )}
+          </div>
+
           <select
             value={categoryFilter}
             onChange={(event) => handleCategoryFilterSelect(event.target.value)}
@@ -487,6 +642,12 @@ function App() {
 
           <div className="filter-row" role="tablist" aria-label="状態フィルター">
             <FilterButton active={filter === "all"} label="すべて" onClick={() => setFilter("all")} />
+            <FilterButton active={filter === "soon"} label="期限間近" onClick={() => setFilter("soon")} />
+            <FilterButton
+              active={filter === "expired"}
+              label="期限切れ"
+              onClick={() => setFilter("expired")}
+            />
             <FilterButton active={filter === "opened"} label="開封済み" onClick={() => setFilter("opened")} />
             <FilterButton
               active={filter === "completed"}
@@ -508,7 +669,7 @@ function App() {
                 key={item.id}
                 item={item}
                 menuOpen={openMenuId === item.id}
-                onComplete={completeItem}
+                onComplete={requestConsume}
                 onDelete={deleteItem}
                 onEdit={openEditForm}
                 onMenuToggle={(id) => setOpenMenuId((current) => (current === id ? null : id))}
@@ -519,23 +680,121 @@ function App() {
           )}
         </section>
 
-        <details className="maintenance">
-          <summary>データ管理</summary>
-          <button className="text-link-button" type="button" onClick={openCategoryManager}>
-            カテゴリを管理
-          </button>
-          <button className="text-link-button" type="button" onClick={exportBackup}>
-            バックアップを書き出し
-          </button>
-          <label className="text-link-button file-import-label">
-            バックアップを読み込み
-            <input type="file" accept="application/json,.json" onChange={importBackup} />
-          </label>
-          <button className="text-danger-button" type="button" onClick={resetAll}>
-            データを初期化
-          </button>
-        </details>
+        {!isInstalledApp() && (
+          <footer className="app-footer">
+            <a className="play-link" href={PLAY_STORE_URL} target="_blank" rel="noopener">
+              Androidアプリ版を Google Play で入手
+            </a>
+          </footer>
+        )}
+
       </main>
+
+      {isMaintenanceOpen && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={() => setIsMaintenanceOpen(false)}
+        >
+          <section
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="maintenance-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h2 id="maintenance-title">データ管理</h2>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="閉じる"
+                onClick={() => setIsMaintenanceOpen(false)}
+              >
+                x
+              </button>
+            </div>
+
+            <div className="maintenance-panel">
+              <button
+                className="text-link-button"
+                type="button"
+                onClick={() => openCategoryManager()}
+              >
+                カテゴリを管理
+              </button>
+              <button className="text-link-button" type="button" onClick={exportBackup}>
+                バックアップを書き出し
+              </button>
+              <label className="text-link-button file-import-label">
+                バックアップを読み込み
+                <input type="file" accept="application/json,.json" onChange={importBackup} />
+              </label>
+              <button className="text-danger-button" type="button" onClick={resetAll}>
+                データを初期化
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {consumingItem && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={closeConsumeModal}>
+          <section
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="consume-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h2 id="consume-title">{consumingItem.name}</h2>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="閉じる"
+                onClick={closeConsumeModal}
+              >
+                x
+              </button>
+            </div>
+
+            <form className="item-form" onSubmit={handleConsumeSubmit}>
+              <p className="consume-stock">残り{consumingItem.quantity}個</p>
+
+              <label>
+                いくつ使いましたか？
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={consumingItem.quantity}
+                  value={consumeAmount}
+                  onChange={(event) => setConsumeAmount(event.target.value)}
+                  autoFocus
+                />
+              </label>
+
+              <button
+                type="button"
+                className="text-link-button"
+                onClick={() => setConsumeAmount(String(consumingItem.quantity))}
+              >
+                全部使いきった（{consumingItem.quantity}個）
+              </button>
+
+              <div className="form-actions">
+                <button className="secondary-button" type="button" onClick={closeConsumeModal}>
+                  キャンセル
+                </button>
+                <button className="primary-button" type="submit">
+                  記録する
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
 
       {isFormOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={closeForm}>
@@ -613,20 +872,6 @@ function App() {
                 />
               </label>
 
-              <label>
-                通知メモ
-                <select
-                  value={form.notifyDaysBefore}
-                  onChange={(event) => updateForm("notifyDaysBefore", event.target.value)}
-                >
-                  {NOTIFY_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
               <div className="form-actions">
                 <button className="secondary-button" type="button" onClick={closeForm}>
                   キャンセル
@@ -680,7 +925,7 @@ function ItemRow({
 }: {
   item: ExpiryItem;
   menuOpen: boolean;
-  onComplete: (id: string) => void;
+  onComplete: (item: ExpiryItem) => void;
   onDelete: (id: string) => void;
   onEdit: (item: ExpiryItem) => void;
   onMenuToggle: (id: string) => void;
@@ -690,19 +935,25 @@ function ItemRow({
   const expiryStatus = item.status === "completed" ? "completed" : getExpiryStatus(item.expiryDate);
   const completedText = item.completedAt ? `完了 ${toLocalDateTime(item.completedAt)}` : "完了済み";
 
+  const isCompleted = item.status === "completed";
+
   return (
     <article className={`item-row ${expiryStatus}`}>
-      <div className="row-date">
-        <span className="days-label">{formatDaysLabel(item.expiryDate)}</span>
-        <span>{formatShortDate(item.expiryDate)}</span>
-      </div>
+      {!isCompleted && (
+        <div className="row-date">
+          <span className="days-label">{formatDaysLabel(item.expiryDate)}</span>
+          <span>{formatShortDate(item.expiryDate)}</span>
+        </div>
+      )}
 
       <div className="row-body">
         <h2>{item.name}</h2>
         <p>
-          数量:{item.quantity} <span>{item.category}</span>
-          {item.opened && <span className="opened-label">開封済み</span>}
-          {item.status === "completed" && <span>{completedText}</span>}
+          {/* 食べきった項目の「数量」は完了時点の在庫で、残数ではないため出さない */}
+          {!isCompleted && <span>数量:{item.quantity}</span>}
+          <span>{item.category}</span>
+          {!isCompleted && item.opened && <span className="opened-label">開封済み</span>}
+          {isCompleted && <span>{completedText}</span>}
         </p>
         {item.memo && <p className="row-memo">{item.memo}</p>}
       </div>
@@ -726,8 +977,8 @@ function ItemRow({
               </button>
             ) : (
               <>
-                <button type="button" onClick={() => onComplete(item.id)}>
-                  食べた・使い切った
+                <button type="button" onClick={() => onComplete(item)}>
+                  {item.quantity > 1 ? "使った数を記録" : "食べた・使い切った"}
                 </button>
                 <button type="button" onClick={() => onToggleOpened(item.id)}>
                   {item.opened ? "未開封に戻す" : "開封済みにする"}

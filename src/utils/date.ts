@@ -7,6 +7,15 @@ export function getLocalToday(): Date {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate());
 }
 
+// バックアップのファイル名などに使う「今日」。
+// toISOString() はUTC基準なので、日本時間の 0:00〜8:59 に実行すると前日になる。
+export function getLocalDateStamp(): string {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}${month}${day}`;
+}
+
 export function parseLocalDate(date: string): Date {
   const [year, month, day] = date.split("-").map(Number);
   return new Date(year, month - 1, day);

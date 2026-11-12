@@ -61,8 +61,16 @@ export function getItems(): ExpiryItem[] {
   }
 }
 
-export function saveItems(items: ExpiryItem[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+// 保存は失敗しうる（端末の空き容量不足、ブラウザ設定でストレージが無効など）。
+// 失敗を握りつぶすと「画面には登録できているのに次回起動で消える」ため、
+// 呼び出し側が巻き戻せるように成否を返す。
+export function saveItems(items: ExpiryItem[]): boolean {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function getCategories(items: ExpiryItem[] = []): string[] {
@@ -79,12 +87,17 @@ export function getCategories(items: ExpiryItem[] = []): string[] {
   }
 }
 
-export function saveCategories(categories: string[]): void {
+export function saveCategories(categories: string[]): boolean {
   const normalized = categories
     .map((category) => category.trim())
     .filter((category, index, list) => category && list.indexOf(category) === index);
 
-  localStorage.setItem(CATEGORY_STORAGE_KEY, JSON.stringify(normalized));
+  try {
+    localStorage.setItem(CATEGORY_STORAGE_KEY, JSON.stringify(normalized));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function createBackup(items: ExpiryItem[], categories: string[]): AppBackup {
@@ -98,7 +111,15 @@ export function createBackup(items: ExpiryItem[], categories: string[]): AppBack
 }
 
 export function parseBackup(raw: string): AppBackup {
-  const parsed: unknown = JSON.parse(raw);
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // JSON.parse の例外文は英語なので、そのままユーザーに出さない。
+    throw new Error("バックアップファイルの形式が正しくありません。");
+  }
+
   if (!parsed || typeof parsed !== "object") {
     throw new Error("バックアップファイルの形式が正しくありません。");
   }

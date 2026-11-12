@@ -17,4 +17,4 @@ export type ExpiryItem = {
   completedAt?: string;
 };
 
-export type FilterMode = "all" | "opened" | "completed";
+export type FilterMode = "all" | "soon" | "expired" | "opened" | "completed";

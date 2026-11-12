@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "jp.revoapp.shomikigen",
+      "sha256_cert_fingerprints": [
+        "58:11:EB:40:2A:27:32:44:8B:DA:27:B9:FE:3D:EC:72:91:3E:A9:95:6B:BD:FB:DC:06:10:F2:AB:1B:E3:43:84",
+        "F6:34:40:C9:CC:02:8E:43:9E:F2:55:20:04:97:A0:5A:CC:F9:6E:54:69:53:99:5F:4B:6A:5F:85:AB:03:01:5B"
+      ]
+    }
+  }
+]

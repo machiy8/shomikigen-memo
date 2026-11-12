@@ -4,3 +4,14 @@ dist/
 .env.local
 npm-debug.log*
 *.tsbuildinfo
+
+.vercel
+.env*
+
+# TWA / Android — 署名鍵は絶対にコミットしない
+*.keystore
+*.jks
+twa/build/
+twa/.gradle/
+twa/app/build/
+twa/local.properties
