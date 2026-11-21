@@ -1,0 +1,239 @@
+# 賞味期限メモ iPhone版のクラウドビルド（GitHub Actions の macOS ランナー）
+#
+# ジョブA build      : push と手動実行で動く。署名なしでビルドが通るかだけを確かめる（鍵は要らない）
+# ジョブB testflight : 手動実行で「TestFlight へ上げる」にチェックしたときだけ動く。
+#                      Secrets（App Store Connect API キーと Team ID）が無ければ、足りない名前を出して止まる
+#
+# fastlane は使わない：xcodebuild の自動署名（-allowProvisioningUpdates＋API キー）と altool だけで
+# 署名から送信まで足りるため。Ruby とその設定を増やさない。
+#
+# Secrets（GitHub のリポジトリ → Settings → Secrets and variables → Actions）
+#   ASC_ISSUER_ID   App Store Connect の「発行者 ID」
+#   ASC_KEY_ID      API キーの「キー ID」
+#   ASC_KEY_P8      ダウンロードした AuthKey_XXXX.p8 の中身（-----BEGIN PRIVATE KEY----- から END の行まで全部）
+#   APPLE_TEAM_ID   Apple Developer の Team ID（10文字）
+#
+# ビルド番号（CFBundleVersion）は「このワークフローの実行番号＋BUILD_NUMBER_OFFSET」で毎回自動で増える。
+
+name: iOS
+
+on:
+  push:
+    branches: [main, "feature/**"]
+    paths:
+      - "src/**"
+      - "public/**"
+      - "index.html"
+      - "ios/**"
+      - "package.json"
+      - "package-lock.json"
+      - "capacitor.config.ts"
+      - "vite.config.ts"
+      - "tsconfig.json"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+    inputs:
+      testflight:
+        description: "TestFlight へ上げる（Secrets が登録済みのときだけ）"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+  # ワークフローの名前やファイルを作り直すと実行番号が 1 に戻る。そのときはここを前回の番号以上にする
+  BUILD_NUMBER_OFFSET: "0"
+
+jobs:
+  build:
+    name: A 署名なしビルド
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Xcode の版を表示
+        run: xcodebuild -version
+
+      - name: npm ci
+        run: npm ci
+
+      - name: テスト
+        run: npm test
+
+      - name: Web をビルド
+        run: npm run build
+
+      - name: iOS へ同期（npx cap sync ios）
+        run: npx cap sync ios
+
+      - name: plist の書式を確認
+        run: plutil -lint ios/App/App/Info.plist ios/App/App/PrivacyInfo.xcprivacy
+
+      - name: ビルド番号を決める
+        run: echo "BUILD_NUMBER=$(( GITHUB_RUN_NUMBER + BUILD_NUMBER_OFFSET ))" >> "$GITHUB_ENV"
+
+      - name: xcodebuild（署名なし・Release・実機向け）
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            build | tee "$RUNNER_TEMP/xcodebuild.log" | grep -E "error:|warning: .*(Privacy|Info.plist)|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" "$RUNNER_TEMP/xcodebuild.log"
+
+      - name: できた .app の中身を確認
+        run: |
+          APP="$RUNNER_TEMP/dd/Build/Products/Release-iphoneos/App.app"
+          test -f "$APP/PrivacyInfo.xcprivacy" && echo "PrivacyInfo.xcprivacy: あり"
+          test -f "$APP/public/index.html" && echo "public/index.html: あり"
+          for k in CFBundleDisplayName CFBundleIdentifier CFBundleShortVersionString CFBundleVersion UIDeviceFamily ITSAppUsesNonExemptEncryption; do
+            printf '%s = ' "$k"; /usr/libexec/PlistBuddy -c "Print :$k" "$APP/Info.plist" | tr '\n' ' '; echo
+          done
+
+      - name: 失敗したらビルドログを残す
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: ${{ runner.temp }}/xcodebuild.log
+          retention-days: 7
+
+  testflight:
+    name: B 署名して TestFlight へ
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.testflight
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - name: Secrets がそろっているか確認（値は表示しない）
+        run: |
+          missing=""
+          for name in ASC_ISSUER_ID ASC_KEY_ID ASC_KEY_P8 APPLE_TEAM_ID; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error title=Secrets が足りません::次の Secrets が未登録です:$missing 。手順書の「GitHub に鍵を登録する」を済ませてから、もう一度実行してください。"
+            exit 1
+          fi
+          echo "Secrets: 4件そろっています（ASC_KEY_P8 は ${#ASC_KEY_P8} 文字）"
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Xcode の版を表示
+        run: xcodebuild -version
+
+      - name: Web をビルドして iOS へ同期
+        run: |
+          npm ci
+          npm run build
+          npx cap sync ios
+
+      - name: ビルド番号を決める
+        run: echo "BUILD_NUMBER=$(( GITHUB_RUN_NUMBER + BUILD_NUMBER_OFFSET ))" >> "$GITHUB_ENV"
+
+      - name: API キーを一時ファイルに置く
+        run: |
+          KEY_DIR="$HOME/.appstoreconnect/private_keys"
+          mkdir -p "$KEY_DIR"
+          KEY_PATH="$KEY_DIR/AuthKey_${ASC_KEY_ID}.p8"
+          printf '%s\n' "$ASC_KEY_P8" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          echo "KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+
+      - name: archive（自動署名）
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            archive | tee "$RUNNER_TEMP/archive.log" | grep -E "error:|ARCHIVE (SUCCEEDED|FAILED)" || true
+          grep -q "ARCHIVE SUCCEEDED" "$RUNNER_TEMP/archive.log"
+
+      - name: .ipa を書き出す（App Store 配布用）
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>export</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict>
+          </plist>
+          EOF
+          set -o pipefail
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            | tee "$RUNNER_TEMP/export.log" | grep -E "error:|EXPORT (SUCCEEDED|FAILED)" || true
+          grep -q "EXPORT SUCCEEDED" "$RUNNER_TEMP/export.log"
+          ls -la "$RUNNER_TEMP/export"
+
+      - name: TestFlight へアップロード
+        run: |
+          IPA=$(ls "$RUNNER_TEMP"/export/*.ipa | head -1)
+          xcrun altool --upload-app --type ios --file "$IPA" \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+          echo "アップロードしました：ビルド番号 $BUILD_NUMBER。App Store Connect の TestFlight に出るまで 10〜30 分ほどかかります。"
+
+      - name: 失敗したらログを残す
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: signing-logs
+          path: |
+            ${{ runner.temp }}/archive.log
+            ${{ runner.temp }}/export.log
+          retention-days: 7
+
+      - name: API キーを消す
+        if: always()
+        run: rm -rf "$HOME/.appstoreconnect/private_keys"
