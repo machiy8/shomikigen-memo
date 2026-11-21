@@ -9,6 +9,11 @@ const config: CapacitorConfig = {
     // Web 版（shomikigen.revoapp.jp）と同じ見た目の背景
     backgroundColor: "#F5F7FB"
   },
+  ios: {
+    // Web 側の CSS（index.html の viewport）を変えずに、ステータスバーとホームバーの下に画面が潜らないようにする。
+    // 背景色は指定しない（ダークモードではページの暗い背景がそのまま見えるように）
+    contentInset: "always"
+  },
   plugins: {
     LocalNotifications: {
       smallIcon: "ic_stat_notify",
